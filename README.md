@@ -1,2 +1,2 @@
 # meteopy
-Tools for experimenting with meteorological data for Bufkit soundings.
+Tools for experimenting with meteorological data from Bufkit soundings. These are almost entirely focused on analyzing stability related to wildfire plumes.

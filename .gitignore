@@ -1,3 +1,7 @@
+# Developer environment.
+Session.vim
+tags
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
