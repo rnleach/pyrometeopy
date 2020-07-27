@@ -136,6 +136,38 @@ class Sounding(namedtuple('Sounding', ['profile', 'surface'])):
         return "Sounding " + str(self.profile)
 
 
+def parse_str(text):
+    """Parse a string as if it had been read directly from a Bufkit file.
+
+    text is the string, or text data, that will be parsed according to
+    Bufkit file format.
+
+    Returns a Tuple with all the parsed Sounding objects sorted in order
+    of increasing lead time. If there are any errors parsing a sounding
+    it's silently skipped. If the whole file is invalid, then an empty
+    Tuple is returned.
+    """
+    profiles = re.finditer(r'(^STID(.|\n)*?)(?=^(STID|STN YYMMDD/HHMM))', text, re.MULTILINE)
+    
+    profiles = map(lambda p: p.group(1), profiles)
+    profiles = map(__parse_profile, profiles)
+    
+    surface_data = re.search(r'(^STN YYMMDD/HHMM)(.|\n)*', text, re.MULTILINE)
+    
+    if surface_data is not None:
+        surface_data = __parse_surface_data(surface_data.group(0))
+    
+    # Merge profile and surface data
+    sndings = []
+    for p in profiles:
+        sfc = next((sfc for sfc in surface_data if sfc.time == p.time), [None])
+        if sfc is None:
+            print("SUCKS")
+        sndings.append(Sounding(p, sfc))
+    
+    return tuple(sorted(sndings, key=lambda x: x.profile.leadTime))
+
+
 def parse_file(file_name):
     """Parse a Bufkit file to provide a Tuple of Soundings.
 
@@ -149,26 +181,30 @@ def parse_file(file_name):
     
     with open(file_name, 'r') as f:
         text = f.read()
-        
-        profiles = re.finditer(r'(^STID(.|\n)*?)(?=^(STID|STN YYMMDD/HHMM))', text, re.MULTILINE)
-        
-        profiles = map(lambda p: p.group(1), profiles)
-        profiles = map(__parse_profile, profiles)
-        
-        surface_data = re.search(r'(^STN YYMMDD/HHMM)(.|\n)*', text, re.MULTILINE)
-        
-        if surface_data is not None:
-            surface_data = __parse_surface_data(surface_data.group(0))
-        
-        # Merge profile and surface data
-        sndings = []
-        for p in profiles:
-            sfc = next((sfc for sfc in surface_data if sfc.time == p.time), [None])
-            if sfc is None:
-                print("SUCKS")
-            sndings.append(Sounding(p, sfc))
-        
-        return tuple(sorted(sndings, key=lambda x: x.profile.leadTime))
+        return parse_str(text)
+
+
+def get_profile_from_str(string_data, vt):
+    """Get the lowest lead time profile that matches the valid time.
+
+    string_data - either a single string representing a file's worth of
+        data or a list of strings, each representing a file's worth of
+        data.
+    vt - the valid time we want the lowest lead time sounding for.
+
+    Returns a single BufkitData.Sounding valid at vt
+    """
+    if isinstance(string_data, str):
+        data = (string_data,)
+    else:
+        data = string_data
+    
+    snds = get_profiles_from_strs(data)
+    
+    for snd in snds:
+        if snd.profile.time == vt:
+            return snd
+    return None
 
 
 def get_profile(target_dir, vt):
@@ -186,6 +222,19 @@ def get_profile(target_dir, vt):
         if snd.profile.time == vt:
             return snd
     return None
+
+
+def get_profiles_from_strs(list_of_strings):
+    """Parse all of the strings in the list into a merged time series.
+
+       The single time series is composed of soundings taken from all 
+       the strings. If there were mulitple strings that had a sounding 
+       for a specific valid time, then the one with the shortest lead
+       time will be selected. In this way several model runs can be 
+       mosaiced together into a single time series.
+    """
+    time_series_list = map(parse_str, list_of_strings)
+    return __merge_soundings_into_single_series(time_series_list)
 
 
 def get_profiles(target_dir):
@@ -206,21 +255,27 @@ def get_profiles(target_dir):
         paths = (path.join(target_dir, f) for f in listdir(target_dir))
         time_series_list = map(parse_file, paths)
         
-        p_dict = {}
-        for ts in time_series_list:
-            for sounding in ts:
-                key = sounding.profile.time.strftime("%Y%m%d%H%M")
-                if key not in p_dict.keys():
-                    p_dict[key] = sounding
-                elif sounding.profile.leadTime < p_dict[key].profile.leadTime:
-                    p_dict[key] = sounding
-        
-        profiles_list = list(p_dict.values())
-        profiles_list.sort(key=lambda x: x.profile.time)
+        profiles_list = __merge_soundings_into_single_series(time_series_list)
         
         get_profiles.profiles = profiles_list
     
     return get_profiles.profiles
+
+
+def __merge_soundings_into_single_series(time_series_list):
+    p_dict = {}
+    for ts in time_series_list:
+        for sounding in ts:
+            key = sounding.profile.time.strftime("%Y%m%d%H%M")
+            if key not in p_dict.keys():
+                p_dict[key] = sounding
+            elif sounding.profile.leadTime < p_dict[key].profile.leadTime:
+                p_dict[key] = sounding
+    
+    profiles_list = list(p_dict.values())
+    profiles_list.sort(key=lambda x: x.profile.time)
+    
+    return tuple(profiles_list)
 
 
 def __parse_columns(text):
