@@ -626,11 +626,12 @@ def hdw(sounding):
     vals = tuple(takewhile(lambda x: x[0] <= top, vals))
     
     vpds = ((x[1], x[2]) for x in vals if x[1] is not None and x[2] is not None)
-    vpds = ((vapor_pressure_liquid_water(x[0]) - vapor_pressure_liquid_water(x[1])) for x in vpds)
+    vpds = ((wxf.vapor_pressure_liquid_water(x[0]) - \
+            wxf.vapor_pressure_liquid_water(x[1])) for x in vpds)
     max_vpd = max(vpds)
     
     max_wspd = max(x[3] for x in vals if x[3] is not None)
-    max_wspd = knots_to_mps(max_wspd)
+    max_wspd = wxf.knots_to_mps(max_wspd)
     return max_vpd * max_wspd
 
 
