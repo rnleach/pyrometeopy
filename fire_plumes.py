@@ -147,7 +147,9 @@ class ParcelAscentAnalysis(
 
 
 class BlowUpAnalysis(
-    namedtuple("BlowUpAnalysis", ("dt_cloud", "dt_lmib_blow_up", "dz_lmib_blow_up"))
+    namedtuple(
+        "BlowUpAnalysis", ("dt_cloud", "dt_lmib_blow_up", "dz_lmib_blow_up", "pct_wet_cape")
+    )
 ):
     """An analysis of how much heating it will take to cause a blow up.
 
@@ -178,7 +180,13 @@ class BlowUpAnalysis(
         else:
             dz = "%5.0f" % self.dz_lmib_blow_up
         
-        return ("BlowUpAnalysis: ΔT Cld - %s," + " ΔT LMIB - %s, ΔZ LMIB - %s") % (cld, lmib, dz)
+        if self.pct_wet_cape is None:
+            pw = " None"
+        else:
+            pw = "%3.0f%%" % (self.pct_wet_cape * 100,)
+        
+        return ("BlowUpAnalysis: ΔT Cld - %s," +
+                " ΔT LMIB - %s, ΔZ LMIB - %s, Pct Wet - %s") % (cld, lmib, dz, pw)
 
 
 def lift_parcel(parcel, sounding):
@@ -600,13 +608,13 @@ def _moist_adiabatic_descend_parcel(parcel, sounding):
         reversed(sounding.profile.hgt),
     )
     # Remove levels missing values.
-    env_profile = (x for x in env_profile if all(y is not None for y in x))
+    env_profile = (x for x in env_profile if all(x))
     # Skip levels above the level of our starting parcel
     env_profile = dropwhile(lambda x: x[0] < parcel.pressure, env_profile)
     # Calculate the environmental virtual temperature
     env_profile = ((x[0], wxf.virtual_temperature_c(x[1], x[2], x[0]), x[3]) for x in env_profile)
     # Remove any levels with None
-    env_profile = (x for x in env_profile if all(y is not None for y in x))
+    env_profile = (x for x in env_profile if all(x))
     
     pcl_theta_e = wxf.theta_e_kelvin(parcel.temperature, parcel.dew_point, parcel.pressure)
     
@@ -616,7 +624,7 @@ def _moist_adiabatic_descend_parcel(parcel, sounding):
     
     full_profile = ((x[1], calc_parcel_vt(x[0]), x[2], x[0]) for x in env_profile)
     # Remove levels that we could not calculate a value.
-    full_profile = (x for x in full_profile if all(y is not None for y in x))
+    full_profile = (x for x in full_profile if all(x))
     
     return full_profile
 
@@ -686,6 +694,7 @@ def blow_up_analysis(sounding, moisture_ratio):
     anals = tuple(analyze_parcel_ascent(pp) for pp in profiles)
     
     _lcls, _els, _tops, _byncy, lmibs, _dry_byncy, cld_dpts = zip(*anals)
+    pws = tuple(x.percent_wet_cape() for x in anals)
     
     def clean_up_pairs(dt_vals, tgt_vals):
         """Match dts with their vals, removing any None values."""
@@ -695,7 +704,7 @@ def blow_up_analysis(sounding, moisture_ratio):
         
         return zip(*pairs)
     
-    def find_blow_up_dt(dt_vals, tgt_vals):
+    def find_blow_up_dt(dt_vals, tgt_vals, p1_tgt_vals):
         data = clean_up_pairs(dt_vals, tgt_vals)
         if data is None:
             return MAX_DT
@@ -705,10 +714,13 @@ def blow_up_analysis(sounding, moisture_ratio):
         max_idx = np.argmax(tgt_grads)
         low_idx = max(0, max_idx - int(0.5 / DT_STEP))
         high_idx = min(len(tgt_dts) - 1, max_idx + int(0.5 / DT_STEP))
+        p1_idx = max_idx + int(1.0 / DT_STEP)
+        p1_idx = max(0, p1_idx)
+        p1_idx = min(p1_idx, len(tgt_dts) - 1)
         
-        return (tgt_dts[max_idx], tgt_vals[high_idx] - tgt_vals[low_idx])
+        return (tgt_dts[max_idx], tgt_vals[high_idx] - tgt_vals[low_idx], p1_tgt_vals[p1_idx])
     
-    dt_lmib_blow_up, dz_lmib_blow_up = find_blow_up_dt(dts, lmibs)
+    dt_lmib_blow_up, dz_lmib_blow_up, p1_pw = find_blow_up_dt(dts, lmibs, pws)
     
     data = clean_up_pairs(dts, cld_dpts)
     if data is None:
@@ -718,7 +730,7 @@ def blow_up_analysis(sounding, moisture_ratio):
         cld_idx = min(range(len(cld_dts)), key=lambda i: abs(cld_vals[i]))
         dt_cloud = cld_dts[cld_idx]
     
-    return BlowUpAnalysis(dt_cloud, dt_lmib_blow_up, dz_lmib_blow_up)
+    return BlowUpAnalysis(dt_cloud, dt_lmib_blow_up, dz_lmib_blow_up, p1_pw)
 
 
 def hdw(sounding):
