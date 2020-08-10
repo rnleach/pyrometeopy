@@ -20,6 +20,9 @@ class Parcel(namedtuple("Parcel", ("temperature", "dew_point", "pressure"))):
     def __str__(self):
         return "Parcel: %.2f °C / %.2f °C %.0f hPa" % \
             (self.temperature, self.dew_point, self.pressure)
+    
+    def is_complete(self):
+        return all(x is not None for x in self)
 
 
 class ParcelProfile(
@@ -391,7 +394,7 @@ def _analyze_parcel_ascent_inner(parcel_profile, stop_at_el=False):
     
     ascent_vals = tuple(convert_to_buoyancy_like_value(x) for x in ascent_iter)
     
-    # Build iterator to iterate over two values at a time sow we can integrate
+    # Build iterator to iterate over two values at a time so we can integrate
     # with the trapezoid rule
     steps = zip(ascent_vals, ascent_vals[1:])
     
@@ -552,6 +555,110 @@ def heated_parcel(starting_parcel, heating, moisture_ratio):
     return starting_parcel._replace(temperature=new_t, dew_point=new_dp)
 
 
+def _dcape_parcel(sounding):
+    """Find the starting parcel for anaylyzing dcape."""
+    # Find the top pressure which is  400hPa above the surface.
+    sfc_pressure = sounding.surface.pres
+    if sfc_pressure is None:
+        pprofile = iter(sounding.profile.pressure)
+        while sfc_pressure is None:
+            sfc_pressure = next(pprofile)
+    top_pressure = sfc_pressure - 400.0
+    
+    # Get all the ingredients needed to make a parcel from the profile.
+    levels = zip(sounding.profile.temp, sounding.profile.dewpoint, sounding.profile.pressure)
+    # Wrap them in a parcel namedtuple.
+    levels = (Parcel(*x) for x in levels)
+    # Only look at levels with all the values we need.
+    levels = (x for x in levels if x.is_complete())
+    # Only take values up to the pressure of the top level
+    levels = takewhile(lambda x: x.pressure >= top_pressure, levels)
+    # Calculate the theta-e value and pair it with the parcel.
+    level_vals = ((x, wxf.theta_e_kelvin(*x)) for x in levels)
+    # Filter out None theta-e values
+    level_vals = (x for x in level_vals if x[1] is not None)
+    # Find the level with the lowest theta e
+    pcl, _ = min(level_vals, key=lambda x: x[1])
+    
+    assert pcl is not None, "None parcel."
+    
+    return pcl
+
+
+def _moist_adiabatic_descend_parcel(parcel, sounding):
+    """Descend a parcel to the surface moist adiabatically.
+
+    Returns an iterator with elements of 
+    (env_virt_t, pcl_virt_t, hgt, pres). The iterator moves in a top down
+    order through the sounding.
+    """
+    # Work from the top down.
+    env_profile = zip(
+        reversed(sounding.profile.pressure),
+        reversed(sounding.profile.temp),
+        reversed(sounding.profile.dewpoint),
+        reversed(sounding.profile.hgt),
+    )
+    # Remove levels missing values.
+    env_profile = (x for x in env_profile if all(y is not None for y in x))
+    # Skip levels above the level of our starting parcel
+    env_profile = dropwhile(lambda x: x[0] < parcel.pressure, env_profile)
+    # Calculate the environmental virtual temperature
+    env_profile = ((x[0], wxf.virtual_temperature_c(x[1], x[2], x[0]), x[3]) for x in env_profile)
+    # Remove any levels with None
+    env_profile = (x for x in env_profile if all(y is not None for y in x))
+    
+    pcl_theta_e = wxf.theta_e_kelvin(parcel.temperature, parcel.dew_point, parcel.pressure)
+    
+    def calc_parcel_vt(press):
+        parcel_t = wxf.temperature_c_from_theta_e_saturated_and_pressure(press, pcl_theta_e)
+        return wxf.virtual_temperature_c(parcel_t, parcel_t, press)
+    
+    full_profile = ((x[1], calc_parcel_vt(x[0]), x[2], x[0]) for x in env_profile)
+    # Remove levels that we could not calculate a value.
+    full_profile = (x for x in full_profile if all(y is not None for y in x))
+    
+    return full_profile
+
+
+def dcape(sounding):
+    """Calculate the DCAPE of the provided sounding.
+
+    Returns the DCAPE in J/kg.
+    """
+    pcl = _dcape_parcel(sounding)
+    descent_iter = _moist_adiabatic_descend_parcel(pcl, sounding)
+    
+    def convert_to_buoyancy_like_value(x):
+        et, pt, h, p = x
+        et = wxf.theta_kelvin(p, et)
+        pt = wxf.theta_kelvin(p, pt)
+        buoyancy_val = (pt - et) / et
+        return (buoyancy_val, h)
+    
+    descent_vals = tuple(convert_to_buoyancy_like_value(x) for x in descent_iter)
+    
+    # Build iterator to iterate over two values at a time so we can integrate
+    # with the trapezoid rule
+    steps = zip(descent_vals, descent_vals[1:])
+    
+    int_buoyancy = 0.0
+    
+    for v0, v1 in steps:
+        b0, h0 = v0
+        b1, h1 = v1
+        
+        dz = h1 - h0
+        # dz < 0.0 for descent
+        assert dz <= 0.0, "%.2f,%.2f" % (h0, h1)
+        
+        int_buoyancy += (b0 + b1) * dz
+    
+    dcape_val = int_buoyancy * wxf.g / 2.0
+    
+    return dcape_val
+
+
 def blow_up_analysis(sounding, moisture_ratio):
     """Perform a fire plume blow up analysis on a sounding.
 
@@ -656,6 +763,9 @@ if __name__ == "__main__":
     
     for test_data in test_datas:
         print("\n\n\nWorking on model initial time %s" % test_data[0].profile.time)
+        
+        for snd in test_data:
+            print("DCAPE: ", dcape(snd), "J/kg")
         
         for snd in test_data:
             vt = snd.profile.time
