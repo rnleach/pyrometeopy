@@ -148,7 +148,7 @@ class ParcelAscentAnalysis(
 
 class BlowUpAnalysis(
     namedtuple(
-        "BlowUpAnalysis", ("dt_cloud", "dt_lmib_blow_up", "dz_lmib_blow_up", "pct_wet_cape")
+        "BlowUpAnalysis", ("dt_cloud", "dt_lmib_blow_up", "dz_lmib_blow_up", "pct_wet_cape", "effy")
     )
 ):
     """An analysis of how much heating it will take to cause a blow up.
@@ -160,10 +160,12 @@ class BlowUpAnalysis(
         maximum integrated buoyancy between dt_lmib_blow_up - 0.5°C of
         heating and dt_lmib_blow_up + 0.5°C of heating. This is 
         basically the magnitude of the blowup.
+    pct_wet_cape is the percent of the cape that is wet at blow up +1C
+    effy is the ratio of MIB / heat put in by the fire.
     """
     
     __slots__ = ()
-    
+
     def __str__(self):
         if self.dt_cloud is None:
             cld = "None"
@@ -185,8 +187,13 @@ class BlowUpAnalysis(
         else:
             pw = "%3.0f%%" % (self.pct_wet_cape * 100,)
         
+        if self.eff is None:
+            eff = " None"
+        else:
+            eff = "%3.0f%%" % (self.eff * 100,)
+        
         return ("BlowUpAnalysis: ΔT Cld - %s," +
-                " ΔT LMIB - %s, ΔZ LMIB - %s, Pct Wet - %s") % (cld, lmib, dz, pw)
+                " ΔT LMIB - %s, ΔZ LMIB - %s, Pct Wet - %s, Eff - %s") % (cld, lmib, dz, pw, eff)
 
 
 def lift_parcel(parcel, sounding):
@@ -693,7 +700,7 @@ def blow_up_analysis(sounding, moisture_ratio):
     profiles = (lift_parcel(p, sounding) for p in pcls)
     anals = tuple(analyze_parcel_ascent(pp) for pp in profiles)
     
-    _lcls, _els, _tops, _byncy, lmibs, _dry_byncy, cld_dpts = zip(*anals)
+    _lcls, _els, _tops, byncys, lmibs, _dry_byncy, cld_dpts = zip(*anals)
     pws = tuple(x.percent_wet_cape() for x in anals)
     
     def clean_up_pairs(dt_vals, tgt_vals):
@@ -704,23 +711,26 @@ def blow_up_analysis(sounding, moisture_ratio):
         
         return zip(*pairs)
     
-    def find_blow_up_dt(dt_vals, tgt_vals, p1_tgt_vals):
+    def find_blow_up_dt(dt_vals, tgt_vals, p1_tgt_vals, p1_tgt_vals2):
         data = clean_up_pairs(dt_vals, tgt_vals)
         if data is None:
-            return MAX_DT
+            return (MAX_DT, 0, 0)
         
         tgt_dts, tgt_vals = data
         tgt_grads = np.gradient(tgt_vals, tgt_dts)
         max_idx = np.argmax(tgt_grads)
         low_idx = max(0, max_idx - int(0.5 / DT_STEP))
         high_idx = min(len(tgt_dts) - 1, max_idx + int(0.5 / DT_STEP))
-        p1_idx = max_idx + int(1.0 / DT_STEP)
-        p1_idx = max(0, p1_idx)
-        p1_idx = min(p1_idx, len(tgt_dts) - 1)
+
+        p1_idx = np.asarray(dt_vals >= (1.0 + tgt_dts[max_idx])).nonzero()
+        if len(p1_idx) < 1 or len(p1_idx[0]) < 1:
+            p1_idx = len(dt_vals) - 1
+        else:
+            p1_idx = p1_idx[0][0]
         
-        return (tgt_dts[max_idx], tgt_vals[high_idx] - tgt_vals[low_idx], p1_tgt_vals[p1_idx])
+        return (tgt_dts[max_idx], tgt_vals[high_idx] - tgt_vals[low_idx], p1_tgt_vals[p1_idx], p1_tgt_vals2[p1_idx]/dt_vals[p1_idx]/wxf.cp)
     
-    dt_lmib_blow_up, dz_lmib_blow_up, p1_pw = find_blow_up_dt(dts, lmibs, pws)
+    dt_lmib_blow_up, dz_lmib_blow_up, p1_pw, p1_byncy_return = find_blow_up_dt(dts, lmibs, pws, byncys)
     
     data = clean_up_pairs(dts, cld_dpts)
     if data is None:
@@ -730,7 +740,7 @@ def blow_up_analysis(sounding, moisture_ratio):
         cld_idx = min(range(len(cld_dts)), key=lambda i: abs(cld_vals[i]))
         dt_cloud = cld_dts[cld_idx]
     
-    return BlowUpAnalysis(dt_cloud, dt_lmib_blow_up, dz_lmib_blow_up, p1_pw)
+    return BlowUpAnalysis(dt_cloud, dt_lmib_blow_up, dz_lmib_blow_up, p1_pw, p1_byncy_return)
 
 
 def hdw(sounding):
