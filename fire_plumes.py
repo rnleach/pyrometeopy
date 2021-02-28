@@ -689,7 +689,7 @@ def blow_up_analysis(sounding, moisture_ratio):
 
     Returns BlowUpAnalysis.
     """
-    MIN_DT = 0.0
+    MIN_DT = -5.0
     MAX_DT = 20.0
     DT_STEP = 0.1
     
@@ -698,45 +698,61 @@ def blow_up_analysis(sounding, moisture_ratio):
     
     pcls = (heated_parcel(pcl0, dt, moisture_ratio) for dt in dts)
     profiles = (lift_parcel(p, sounding) for p in pcls)
-    anals = tuple(analyze_parcel_ascent(pp) for pp in profiles)
+    anals = tuple((analyze_parcel_ascent(pp), pp.hgt[0]) for pp in profiles)
     
+    anals, h0s = zip(*anals)
+
     _lcls, _els, _tops, byncys, lmibs, _dry_byncy, cld_dpts = zip(*anals)
     pws = tuple(x.percent_wet_cape() for x in anals)
     
-    def clean_up_pairs(dt_vals, tgt_vals):
+    def clean_up_pairs(dt_vals, tgt_vals, h0s):
         """Match dts with their vals, removing any None values."""
-        pairs = tuple(x for x in zip(dt_vals, tgt_vals) if all(x))
+        pairs = tuple(x for x in zip(dt_vals, tgt_vals, h0s) if all(x))
         if len(pairs) == 0:
             return None
         
         return zip(*pairs)
     
-    def find_blow_up_dt(dt_vals, tgt_vals, p1_tgt_vals, p1_tgt_vals2):
-        data = clean_up_pairs(dt_vals, tgt_vals)
+    def find_blow_up_dt(dt_vals, tgt_vals, p1_tgt_vals, p1_tgt_vals2, h0_vals):
+        data = clean_up_pairs(dt_vals, tgt_vals, h0_vals)
         if data is None:
-            return (MAX_DT, 0, 0)
+            return (MAX_DT, 0, 0, 0)
         
-        tgt_dts, tgt_vals = data
-        tgt_grads = np.gradient(tgt_vals, tgt_dts)
-        max_idx = np.argmax(tgt_grads)
-        low_idx = max(0, max_idx - int(0.5 / DT_STEP))
-        high_idx = min(len(tgt_dts) - 1, max_idx + int(0.5 / DT_STEP))
+        tgt_dts, tgt_vals, h0_vals = data
+
+        # If we start out big, we already blew up with no heating from the fire.
+        if tgt_vals[0] > 5000:
+            max_idx = 0
+            low_idx = 0
+            high_idx = 0
+        else:
+            tgt_grads = np.gradient(tgt_vals, tgt_dts)
+            max_idx = np.argmax(tgt_grads)
+            low_idx = max(0, max_idx - int(0.5 / DT_STEP))
+            high_idx = min(len(tgt_dts) - 1, max_idx + int(0.5 / DT_STEP))
 
         p1_idx = np.asarray(dt_vals >= (1.0 + tgt_dts[max_idx])).nonzero()
+
         if len(p1_idx) < 1 or len(p1_idx[0]) < 1:
             p1_idx = len(dt_vals) - 1
         else:
             p1_idx = p1_idx[0][0]
         
-        return (tgt_dts[max_idx], tgt_vals[high_idx] - tgt_vals[low_idx], p1_tgt_vals[p1_idx], p1_tgt_vals2[p1_idx]/dt_vals[p1_idx]/wxf.cp)
+        dt_bu = tgt_dts[max_idx]
+        if max_idx == 0 and low_idx == 0 and high_idx == 0:
+            dz_bu = tgt_vals[0] - h0_vals[0]
+        else:
+            dz_bu = tgt_vals[high_idx] - tgt_vals[low_idx]
+
+        return (dt_bu, dz_bu, p1_tgt_vals[p1_idx], p1_tgt_vals2[p1_idx]/dt_vals[p1_idx]/wxf.cp)
     
     dt_lmib_blow_up, dz_lmib_blow_up, p1_pw, p1_byncy_return = find_blow_up_dt(dts, lmibs, pws, byncys)
     
-    data = clean_up_pairs(dts, cld_dpts)
+    data = clean_up_pairs(dts, cld_dpts, h0s)
     if data is None:
         dt_cloud = MAX_DT
     else:
-        cld_dts, cld_vals = data
+        cld_dts, cld_vals, _ = data
         cld_idx = min(range(len(cld_dts)), key=lambda i: abs(cld_vals[i]))
         dt_cloud = cld_dts[cld_idx]
     
