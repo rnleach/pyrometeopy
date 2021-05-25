@@ -192,7 +192,7 @@ def get_profile_from_str(string_data, vt):
         data.
     vt - the valid time we want the lowest lead time sounding for.
 
-    Returns a single BufkitData.Sounding valid at vt
+    Returns a single bufkit.Sounding valid at vt
     """
     if isinstance(string_data, str):
         data = (string_data,)
@@ -214,7 +214,7 @@ def get_profile(target_dir, vt):
     vt - the valid time as a datetime.datetime object. UTC always 
         assumed.
 
-    Returns a single BufkitData.Sounding valid at vt
+    Returns a single bufkit.Sounding valid at vt
     """
     snds = get_profiles(target_dir)
     
