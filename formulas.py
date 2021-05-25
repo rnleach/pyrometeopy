@@ -205,7 +205,7 @@ def latent_heat_of_condensation(t_c):
     # The table has values from -40.0 to 40.0. So from -100.0 to -40.0 is
     # actually an exrapolation. I graphed the values from the extrapolation,
     # and the curve looks good, and is approaching the latent heat of
-    # sublimation, but does not exceed it. This seems very reasonable be to me,
+    # sublimation, but does not exceed it. This seems very reasonable to me,
     # especially considering that a common approximation is to just use a
     # constant value.
     if t_c < -100.0 or t_c > 60.0:
@@ -290,6 +290,7 @@ def temperature_c_from_theta_e_saturated_and_pressure(pressure_hpa, theta_e_k):
     return __find_root(func_to_minimize, -80.0, 50.0)
 
 
+# FIXME: Update this to use Brent's method, which usually converges faster.
 def __find_root(func, low_val, high_val):
     """Bisection algorithm for finding the root of an equation.
     
