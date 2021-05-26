@@ -2,11 +2,24 @@
 
 This module should not rely on any modules that are not part of the 
 standard python distribution.
+
+References:
+
+American Meteorological Society, 2021: Glossary of Meteorology. 
+    Accessed May 26th, 2021. https://glossary.ametsoc.org/wiki/Welcome
+
+Alduchov, O. A., and R. E. Eskridge, Improved Magnus' Form Approximation of 
+    Saturation Vapor Pressure. National Climatic Data Center, 21 pp.
+
+Djurić, D., 1994, Weather Analysis. Prentice Hall, 304 pp.
+
+Rogers, R. R., and M. K. Yau, 1989, A Short Course in Cloud Physics, 3rd ed. 
+    Butterworth Heinemann, 290 pp. ISBN 0-7506-3215-1.
 """
 from math import exp, log
 
 # Acceleration due to gravity at the Earth's surface. (m /s^2)
-g = 9.81
+g = -9.81
 
 # The gas constant for dry air. (J / K / kg)
 R = 287.04
@@ -84,23 +97,41 @@ def mps_to_knots(mps):
 
 
 def theta_kelvin(pressure_hpa, t_c):
-    """Calculate the potential temperature in Kelvin."""
+    """Calculate the potential temperature in Kelvin.
+
+    Potential temperature technically requires a reference 
+    pressure to be defined. 1000 hPa is the most commonly 
+    used and is assumed in this function.
+
+    Returns:
+    The potential temperature in K.
+    """
     if pressure_hpa is None or t_c is None:
         return None
     return c_to_k(t_c) * (1000.0 / pressure_hpa)**(R / cp)
 
 
 def temperature_c_from_theta(theta_kelvin, pressure_hpa):
-    """Temperature of a parcel from pressure and potential temperature."""
+    """Temperature from pressure and potential temperature.
+
+    Returns:
+    The temperature in °C.
+    """
     if theta_kelvin is None or pressure_hpa is None:
         return None
     return k_to_c(theta_kelvin * (pressure_hpa / 1000.0)**(R / cp))
 
 
 def vapor_pressure_liquid_water(t_c):
-    """Calculate the vapor pressure over liquid water in hPa."""
+    """Calculate the vapor pressure over liquid water in hPa.
+
+    From page 11 of Alduchov and Eskridge. The authors claim the formula
+    is accurate from -80°C to 50°C.
+
+    Returns:
+    The vapor pressure over water in hPa.
+    """
     
-    # FIXME: Need to document where this formula came from.
     if t_c is None:
         return None
     return 6.1037 * exp(17.641 * t_c / (t_c + 243.27))
@@ -110,6 +141,9 @@ def dew_point_from_vapor_pressure_over_liquid(vp_hpa):
     """Dew point from vapor pressure over liquid water.
     
     This function is the inverse of vapor_pressure_liquid_water.
+
+    Returns:
+    The dew point in °C.
     """
     if vp_hpa is None:
         return None
@@ -118,14 +152,26 @@ def dew_point_from_vapor_pressure_over_liquid(vp_hpa):
 
 
 def calc_rh(t_c, dp_c):
-    """Calculate relative humidity."""
+    """Calculate relative humidity.
+
+    Returns:
+    The relative humidity as a percent.
+    """
     if t_c is None or dp_c is None:
         return None
     return 100.0 * vapor_pressure_liquid_water(dp_c) / vapor_pressure_liquid_water(t_c)
 
 
 def calc_dp(t_c, rh):
-    """Calculate the dew point in Celsius."""
+    """Calculate the dew point in Celsius.
+
+    Arguments:
+    t_c - the temperature in °C.
+    rh - the relative humidity as a percent, (0-100)
+
+    Returns:
+    The dew point in °C.
+    """
     sat_vp = vapor_pressure_liquid_water(t_c)
     vp = sat_vp * rh / 100.0
     a = log(vp / 6.1037) / 17.641
@@ -133,6 +179,11 @@ def calc_dp(t_c, rh):
 
 
 def mixing_ratio(dp_c, pressure_hpa):
+    """Calculate the mixing ratio from the dew point and pressure.
+
+    Returns:
+    The mixing ratio in units of g/g or kg/kg.
+    """
     if dp_c is None or pressure_hpa is None:
         return None
     vp = vapor_pressure_liquid_water(dp_c)
@@ -141,8 +192,11 @@ def mixing_ratio(dp_c, pressure_hpa):
 
 def dew_point_from_p_and_mw(pressure_hpa, mw):
     """Dew point from pressure and mixing ratio.
-    
-    If saturation is assumed this is also the temperature.
+
+    The mixing ratio is in units of g/g or kg/kg, NOT g/kg.
+
+    Returns:
+    The dew point in °C.
     """
     if pressure_hpa is None or mw is None:
         return None
@@ -151,7 +205,13 @@ def dew_point_from_p_and_mw(pressure_hpa, mw):
 
 
 def virtual_temperature_c(t_c, dp_c, pressure_hpa):
-    """Virtual temperature in Celsius."""
+    """Virtual temperature in Celsius.
+
+    Source: AMS Glossary of Meteorology.
+
+    Returns:
+    The virtual temperature in °C.
+    """
     if t_c is None or dp_c is None or pressure_hpa is None:
         return None
     rv = mixing_ratio(dp_c, pressure_hpa)
@@ -164,7 +224,10 @@ def virtual_temperature_c(t_c, dp_c, pressure_hpa):
 def temperature_kelvin_at_lcl(t_c, dp_c):
     """Approximate temperature at the Lifting Condensation Level (LCL).
 
-       Eq 5.17 from "Weather Analysis" by Dusan Dujric
+       Eq 5.17 from "Weather Analysis" by Dušan Dujrić
+
+       Returns:
+       temperature K at the lifting condensation level
     """
     if t_c is None or dp_c is None:
         return None
@@ -179,12 +242,16 @@ def temperature_kelvin_at_lcl(t_c, dp_c):
 def press_and_temp_k_at_lcl(t_c, dp_c, pressure_hpa):
     """Temperature and pressure at the lifting condensation level (LCL).
 
-       Eqs 5.17 and 5.18 from "Weather Analysis" by Dusan Dujric
+       Eqs 5.17 and 5.18 from "Weather Analysis" by Dušan Dujrić
+
+       Returns:
+       tuple (pressure hPa, temperature K)
     """
     if t_c is None or dp_c is None or pressure_hpa is None:
         return (None, None)
     
     if dp_c >= t_c:
+        # It's either saturated or super saturated, so we're already at the LCL.
         return (pressure_hpa, c_to_k(t_c))
     
     t_lcl = temperature_kelvin_at_lcl(t_c, dp_c)
@@ -196,9 +263,10 @@ def press_and_temp_k_at_lcl(t_c, dp_c, pressure_hpa):
 def latent_heat_of_condensation(t_c):
     """Latent heat of condensation for water.
 
-       Polynomial curve fit to Table 2.1. R. R. Rogers; M. K. Yau (1989).
-       A Short Course in Cloud Physics (3rd ed.). Pergamon Press.
-       p. 16. ISBN 0-7506-3215-1.
+    Polynomial curve fit to Table 2.1 on p. 16 in Rogers and Yau.
+
+    Returns:
+    The latent of condensation in J/kg.
     """
     if t_c is None:
         return None
@@ -217,7 +285,10 @@ def latent_heat_of_condensation(t_c):
 def specific_humidity(dp_c, pressure_hpa):
     """Calculate the specific humidity.
 
-       Eqs 5.11 and 5.12 from "Weather Analysis" by Dusan Dujric
+    Eqs 5.11 and 5.12 from "Weather Analysis" by Dušan Dujrić
+
+    Returns:
+    The specific humidity as a decimal, or in g/g or kg/kg and NOT g/kg.
     """
     if dp_c is None or pressure_hpa is None:
         return None
@@ -229,7 +300,10 @@ def specific_humidity(dp_c, pressure_hpa):
 def dew_point_from_p_and_specific_humidity(pressure_hpa, specific_humidity):
     """Dew point from specific humidity and pressure.
     
-    If saturation is assumed this is also the temperature.
+    This is the inverse of the specific_humidity equation above.
+
+    Returns:
+    The dew point in °C.
     """
     if pressure_hpa is None or specific_humidity is None:
         return None
@@ -240,7 +314,10 @@ def dew_point_from_p_and_specific_humidity(pressure_hpa, specific_humidity):
 def theta_e_kelvin(t_c, dp_c, pressure_hpa):
     """Calculate equivalent potential temperature.
 
-       Eq 5.23 from "Weather Analysis" by Dusan Dujric
+    Eq 5.23 from "Weather Analysis" by Dušan Dujrić
+
+    Returns:
+    The equivalent potential temperature in K.
     """
     if t_c is None or dp_c is None or pressure_hpa is None:
         return None
@@ -258,7 +335,10 @@ def theta_e_kelvin(t_c, dp_c, pressure_hpa):
 def theta_e_saturated_kelvin(pressure_hpa, t_c):
     """Equivalent potential temperature assuming saturation.
 
-       Eq 5.23 from "Weather Analysis" by Dusan Dujric
+    Eq 5.23 from "Weather Analysis" by Dušan Dujrić
+
+    Returns:
+    The equivalent potential temperature in K.
     """
     if pressure_hpa is None or t_c is None:
         return None
@@ -276,7 +356,7 @@ def theta_e_saturated_kelvin(pressure_hpa, t_c):
 def temperature_c_from_theta_e_saturated_and_pressure(pressure_hpa, theta_e_k):
     """Temperature from equivalent potential temperature and pressure.
     
-    Assume saturation.
+    Assume saturation. This is the inverse of theta_e_saturated_kelvin.
     """
     if pressure_hpa is None or theta_e_k is None:
         return None

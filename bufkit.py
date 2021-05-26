@@ -1,5 +1,4 @@
 """Module for loading Bufkit files."""
-from __future__ import print_function
 
 from collections import namedtuple
 from datetime import datetime as dt

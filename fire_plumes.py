@@ -452,7 +452,7 @@ def _analyze_parcel_ascent_inner(parcel_profile, stop_at_el=False):
         else:
             cloud_depth = top_hgt - parcel_profile.lcl_height
     
-    max_int_buoyancy *= wxf.g / 2.0
+    max_int_buoyancy *= -wxf.g / 2.0
     
     return (el_hgt, top_hgt, max_int_buoyancy, level_max_int_buoyancy, cloud_depth)
 
@@ -673,7 +673,7 @@ def dcape(sounding):
         
         int_buoyancy += (b0 + b1) * dz
     
-    dcape_val = int_buoyancy * wxf.g / 2.0
+    dcape_val = int_buoyancy * -wxf.g / 2.0
     
     return dcape_val
 
