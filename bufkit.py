@@ -143,7 +143,7 @@ def parse_str(text):
 
     Returns a Tuple with all the parsed Sounding objects sorted in order
     of increasing lead time. If there are any errors parsing a sounding
-    it's silently skipped. If the whole file is invalid, then an empty
+    it's silently skipped. If the whole string is invalid, then an empty
     Tuple is returned.
     """
     profiles = re.finditer(r'(^STID(.|\n)*?)(?=^(STID|STN YYMMDD/HHMM))', text, re.MULTILINE)
