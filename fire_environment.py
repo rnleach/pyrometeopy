@@ -31,9 +31,8 @@ def dcape(sounding):
 
     Downdraft CAPE (DCAPE)
     Follow a moist adiabat down to the ground from the minimum theta-e value in the lowest 400 mb 
-    of the sounding, and then calculate positive and negative area. DCAPE values greater than 
-    1000 J/kg have been associated with increasing potential for strong downdrafts and damaging 
-    outflow winds.
+    of the sounding, and then the calculate area. DCAPE values greater than 1000 J/kg have been
+    associated with increasing potential for strong downdrafts and damaging outflow winds.
 
     Returns the DCAPE in J/kg.
     """
@@ -144,14 +143,36 @@ def hdw(sounding):
     bottom = sounding.profile.elevation
     top = bottom + 500.0
     
+    # Find the station pressure for the surface adjusted temperature and dew point.
+    bottom_p = sounding.surface.pres
+    i = 0
+    while bottom_p is None:
+        bottom_p = sounding.profile.pressure[i]
+        i += 1
+    
     vals = zip(
         sounding.profile.hgt, sounding.profile.temp, sounding.profile.dewpoint,
-        sounding.profile.windSpd
+        sounding.profile.windSpd, sounding.profile.pressure
     )
     
     vals = tuple(takewhile(lambda x: x[0] <= top, vals))
     
-    vpds = ((x[1], x[2]) for x in vals if x[1] is not None and x[2] is not None)
+    # Filter out None values
+    vpds = (
+        (x[1], x[2], x[4])
+        for x in vals
+        if x[1] is not None and x[2] is not None and x[4] is not None
+    )
+    # Convert to potential temperature and specific humidity for reducing to the surface.
+    vpds = ((wxf.theta_kelvin(x[2], x[0]), wxf.specific_humidity(x[1], x[2])) for x in vpds)
+    # Finish surface adjustment.
+    vpds = (
+        (
+            wxf.temperature_c_from_theta(x[0], bottom_p),
+            wxf.dew_point_from_p_and_specific_humidity(bottom_p, x[1])
+        ) for x in vpds
+    )
+    
     vpds = ((wxf.vapor_pressure_liquid_water(x[0]) - \
             wxf.vapor_pressure_liquid_water(x[1])) for x in vpds)
     max_vpd = max(vpds)
