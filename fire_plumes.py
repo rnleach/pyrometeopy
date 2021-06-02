@@ -1,4 +1,21 @@
-"""Analysis of Bufkit soundings in the context of wildfire plumes."""
+"""Analysis of Bufkit soundings in the context of wildfire plumes.
+
+This module deals with measures of wildfire plume-atmospheric stability. In other words, it deals
+with the degree to which the atmosphere promotes or inhibits the growth for wildfire plumes.
+
+References:
+
+Tory, K. J., & Kepert, J. D. (2021). Pyrocumulonimbus Firepower Threshold: Assessing the Atmospheric
+    Potential for pyroCb, Weather and Forecasting, 36(2), 439-456. Retrieved Jun 2, 2021, 
+    from https://journals.ametsoc.org/view/journals/wefo/36/2/WAF-D-20-0027.1.xml
+
+Tory, K. J., Thurston, W., & Kepert, J. D. (2018). Thermodynamics of Pyrocumulus: A Conceptual 
+    Study, Monthly Weather Review, 146(8), 2579-2598. Retrieved Jun 2, 2021, from 
+    https://journals.ametsoc.org/view/journals/mwre/146/8/mwr-d-17-0377.1.xml
+
+Leach, R. N., & Gibson C. V. (2021). Assessing Atmospheric Stability and the Potential for 
+    Pyro-Convection and Wildfire Blow Ups. Manuscript submitted for publication.
+"""
 
 from collections import namedtuple
 from itertools import dropwhile, takewhile
@@ -11,6 +28,8 @@ import numpy as np
 
 class Parcel(namedtuple("Parcel", ("temperature", "dew_point", "pressure"))):
     """Represents a parcel of air and its properties.
+
+    Reference Leach & Gibson, 2021.
 
     temperature and dew_point are in °C and pressure is in hPa.
     """
@@ -32,6 +51,8 @@ class ParcelProfile(
     )
 ):
     """The profile of a lifted parcel.
+
+    Reference Leach & Gibson, 2021.
 
     env_virt_temp is the environmental virtual temperature in °C,
     parcel_virt_temp is the parcel's virtual temperature in °C,
@@ -66,6 +87,8 @@ class ParcelAscentAnalysis(
     )
 ):
     """Results from analyzing a ParcelProfile.
+
+    Reference Leach & Gibson, 2021.
 
     lcl is the lifting condnesation level in meters,
     el is the equilibrium level in meters. In situations where there is
@@ -148,11 +171,12 @@ class ParcelAscentAnalysis(
 
 class BlowUpAnalysis(
     namedtuple(
-        "BlowUpAnalysis",
-        ("dt_cloud", "dt_lmib_blow_up", "dz_lmib_blow_up", "pct_wet_cape", "effy")
+        "BlowUpAnalysis", ("dt_cloud", "dt_lmib_blow_up", "dz_lmib_blow_up", "pct_wet_cape")
     )
 ):
     """An analysis of how much heating it will take to cause a blow up.
+
+    Reference Leach & Gibson, 2021.
 
     dt_cloud is the amount of heating required to create a pyrocumulus.
     dt_lmib_blow_up is the amount of heating required to cause the
@@ -162,7 +186,6 @@ class BlowUpAnalysis(
         heating and dt_lmib_blow_up + 0.5°C of heating. This is 
         basically the magnitude of the blowup.
     pct_wet_cape is the percent of the cape that is wet at blow up +1C
-    effy is the ratio of MIB / heat put in by the fire.
     """
     
     __slots__ = ()
@@ -188,21 +211,21 @@ class BlowUpAnalysis(
         else:
             pw = "%3.0f%%" % (self.pct_wet_cape * 100,)
         
-        if self.effy is None:
-            effy = " None"
-        else:
-            effy = "%3.0f%%" % (self.effy * 100,)
-        
-        return (
-            "BlowUpAnalysis: ΔT Cld - %s," + " ΔT LMIB - %s, ΔZ LMIB - %s, Pct Wet - %s, Eff - %s"
-        ) % (cld, lmib, dz, pw, effy)
+        return ("BlowUpAnalysis: ΔT Cld - %s," +
+                " ΔT LMIB - %s, ΔZ LMIB - %s, Pct Wet - %s") % (cld, lmib, dz, pw)
 
 
 def lift_parcel(parcel, sounding):
     """Simulate lifting a parcel through a sounding focusing on buoyancy.
 
-    Since buoyancy is the focus of lifting, virtual temperatures for
-    both the environment and the parcel are given.
+    Reference Leach & Gibson, 2021.
+
+    The parcel is lifted dry adiabatically until the LCL is reached, and then moist adiabatically
+    from there. The parcel is lifted through the entire sounding, or until we are unable to 
+    calculate a virtual temperature due to missing data in the sounding.
+
+    Since buoyancy is the focus of lifting, virtual temperatures for both the environment and the
+    parcel are given.
 
     parcel is a Parcel as defined above.
     sounding is a Sounding from the BufkitData module.
@@ -369,6 +392,8 @@ def lift_parcel(parcel, sounding):
 
 def analyze_parcel_ascent(parcel_profile):
     """Analyze a parcel profile for important values.
+
+    Reference Leach & Gibson, 2021.
 
     Returns a ParcelAscentAnalysis
     """
@@ -557,6 +582,9 @@ def heated_parcel(starting_parcel, heating, moisture_ratio):
         heating. A value of 10.0 means add 1 g/kg of moisture for every
         10K of heating. None implies adding no moisture at all.
 
+    These parcels are used to simulate a fire heated/moistened parcel in the plume. Reference
+    Leach & Gibson, 2021.
+
     Returns a Parcel.
     """
     assert isinstance(starting_parcel, Parcel)
@@ -576,6 +604,8 @@ def heated_parcel(starting_parcel, heating, moisture_ratio):
 
 def blow_up_analysis(sounding, moisture_ratio):
     """Perform a fire plume blow up analysis on a sounding.
+
+    Reference Leach & Gibson, 2021.
 
     moisture_ratio is the moisture_ratio to apply when creating a
     heated_parcel from the above so named function. If it is None that
@@ -616,7 +646,7 @@ def blow_up_analysis(sounding, moisture_ratio):
     def find_blow_up_dt(dt_vals, tgt_vals, p1_tgt_vals, p1_tgt_vals2, h0_vals):
         data = clean_up_pairs(dt_vals, tgt_vals, h0_vals)
         if data is None:
-            return (MAX_DT, 0, 0, 0)
+            return (MAX_DT, 0, 0)
         
         tgt_dts, tgt_vals, h0_vals = data
         
@@ -644,11 +674,9 @@ def blow_up_analysis(sounding, moisture_ratio):
         else:
             dz_bu = tgt_vals[high_idx] - tgt_vals[low_idx]
         
-        return (dt_bu, dz_bu, p1_tgt_vals[p1_idx], p1_tgt_vals2[p1_idx] / dt_vals[p1_idx] / wxf.cp)
+        return (dt_bu, dz_bu, p1_tgt_vals[p1_idx])
     
-    dt_lmib_blow_up, dz_lmib_blow_up, p1_pw, p1_byncy_return = find_blow_up_dt(
-        dts, lmibs, pws, byncys, h0s
-    )
+    dt_lmib_blow_up, dz_lmib_blow_up, p1_pw = find_blow_up_dt(dts, lmibs, pws, byncys, h0s)
     
     data = clean_up_pairs(dts, cld_dpts, h0s)
     if data is None:
@@ -658,7 +686,7 @@ def blow_up_analysis(sounding, moisture_ratio):
         cld_idx = min(range(len(cld_dts)), key=lambda i: abs(cld_vals[i]))
         dt_cloud = cld_dts[cld_idx]
     
-    return BlowUpAnalysis(dt_cloud, dt_lmib_blow_up, dz_lmib_blow_up, p1_pw, p1_byncy_return)
+    return BlowUpAnalysis(dt_cloud, dt_lmib_blow_up, dz_lmib_blow_up, p1_pw)
 
 
 if __name__ == "__main__":
