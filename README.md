@@ -28,4 +28,8 @@ This module contains functions for analyzing atmospheric parameters that will in
 but are not directly related to the fire plume. Thunderstorm out flow wind potential and the 
 hot-dry-windy index are examples.
 
+### satellite
+
+This module contains functions for working with GOES data with an emphasis on the fire power data.
+
 [bufkit]: https://training.weather.gov/wdtd/tools/BUFKIT/index.php 
