@@ -5,15 +5,15 @@ with the degree to which the atmosphere promotes or inhibits the growth for wild
 
 References:
 
-Tory, K. J., & Kepert, J. D. (2021). Pyrocumulonimbus Firepower Threshold: Assessing the Atmospheric
+Tory K. J., & Kepert J. D. (2021). Pyrocumulonimbus Firepower Threshold: Assessing the Atmospheric
     Potential for pyroCb, Weather and Forecasting, 36(2), 439-456. Retrieved Jun 2, 2021, 
     from https://journals.ametsoc.org/view/journals/wefo/36/2/WAF-D-20-0027.1.xml
 
-Tory, K. J., Thurston, W., & Kepert, J. D. (2018). Thermodynamics of Pyrocumulus: A Conceptual 
+Tory K. J., Thurston W. & Kepert J. D. (2018). Thermodynamics of Pyrocumulus: A Conceptual 
     Study, Monthly Weather Review, 146(8), 2579-2598. Retrieved Jun 2, 2021, from 
     https://journals.ametsoc.org/view/journals/mwre/146/8/mwr-d-17-0377.1.xml
 
-Leach, R. N., & Gibson C. V. (2021). Assessing Atmospheric Stability and the Potential for 
+Leach R. N. & Gibson C. V. (2021). Assessing Atmospheric Stability and the Potential for 
     Pyro-Convection and Wildfire Blow Ups. Manuscript submitted for publication.
 """
 
