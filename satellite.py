@@ -3,6 +3,8 @@
 import datetime as dt
 import netCDF4 as nc
 import numpy as np
+import os.path as path
+import s3fs
 
 def get_total_fire_power(nc_dataset, southwest_corner, northeast_corner):
     """Extract the total fire power in the area of interest.
@@ -35,6 +37,63 @@ def get_total_fire_power(nc_dataset, southwest_corner, northeast_corner):
     total_power = sum(powers) / 1000  # This makes it Gigawatts
 
     return (time, total_power)
+
+
+def download_goes_hotspot_characterization(folder, start, end, satellite = "G17"):
+    """Download hotspot characterization data for Amazon AWS S3.
+
+    Queries the appropriate S3 folders for file names. If they 
+    already exist in the specified folder, they are not 
+    downloaded again.
+
+    Arguments:
+    folder is the location to store the files
+    start is the start time
+    end is the end time and must be after start
+    satellite must be "G17" or "G16" to choose which satellite to use.
+
+    Returns: A list of file names on the local machine for your processing.
+    """
+
+    assert isinstance(start, dt.datetime)
+    assert isinstance(end, dt.datetime)
+    assert end > start
+    assert satellite == "G17" or satellite == "G16"
+
+    if satellite == "G17":
+        bucket = 's3://noaa-goes17'
+    elif satellite == "G16":
+        bucket = 's3://noaa-goes16'
+
+    product = 'ABI-L2-FDCC'
+
+    # Use the anonymous credentials to access public data
+    fs = s3fs.S3FileSystem(anon=True)
+
+    current_time = start
+    result_list = []
+    while current_time < end:
+
+        time_path = current_time.strftime("%Y/%j/%H")
+        remote_dir = "{}/{}/{}".format(bucket, product, time_path)
+
+        remote_files = np.array(fs.ls(remote_dir))
+        local_files = (f.split('/')[-1] for f in remote_files)
+        local_files = (path.join(folder, f) for f in local_files)
+
+        files = tuple(zip(remote_files, local_files))
+
+        for remote, local in files:
+            result_list.append(local)
+
+            if not path.exists(local):
+                print("Downloading", local)
+                fs.get(remote, local)
+
+        # Move ahead an hour
+        current_time += dt.timedelta(hours=1)
+
+    return result_list
 
 
 # EPOCH - satellite data stored in NetCDF files uses this datetime as
