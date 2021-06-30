@@ -78,10 +78,10 @@ class BoundingBox:
         assert isinstance(end, dt.datetime)
         assert start < end
 
-        self._min_lat, self._min_lon = southwest_corner
-        self._max_lat, self._max_lon = northeast_corner
-        self._start, self._end = start, end
-        self._name = name
+        self.min_lat, self.min_lon = southwest_corner
+        self.max_lat, self.max_lon = northeast_corner
+        self.start, self.end = start, end
+        self.name = name
 
         return
 
@@ -120,7 +120,7 @@ def total_fire_power_time_series(files, bounding_boxes):
         for bb in bbs:
             time = get_valid_time(nc_data)
 
-            if time >= bb._start and time <= bb._end:
+            if time >= bb.start and time <= bb.end:
                 total_power = get_total_fire_power(nc_data, bb)
 
                 result_times[bb._name].append(time)
@@ -208,8 +208,8 @@ def _get_grid_cell_indexes(proj, xs, ys, bounding_box):
     lon0 = proj.longitude_of_projection_origin
 
     # Unpack values from the area we want to grab the data
-    min_lat, min_lon = bounding_box._min_lat, bounding_box._min_lon
-    max_lat, max_lon = bounding_box._max_lat, bounding_box._max_lon
+    min_lat, min_lon = bounding_box.min_lat, bounding_box.min_lon
+    max_lat, max_lon = bounding_box.max_lat, bounding_box.max_lon
 
     # Calculate the lat and lon grids
     xs, ys = np.meshgrid(xs, ys)
