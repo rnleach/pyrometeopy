@@ -100,7 +100,7 @@ def m_to_km(meters):
     """Convert meters to kilometers."""
     if meters is None:
         return None
-
+    
     return meters / 1000
 
 

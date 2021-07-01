@@ -705,186 +705,188 @@ def pft(sounding, moisture_ratio):
     Returns the PFT in gigawatts.
     """
     theta_ml, q_ml, p_sfc = _entrained_mixed_layer(sounding)
-
+    
     if theta_ml is None:
         return None
-
-    z_fc, p_fc, theta_fc, d_theta_fc = _free_convection_level(sounding, moisture_ratio, theta_ml,
-            q_ml)
-
+    
+    z_fc, p_fc, theta_fc, d_theta_fc = _free_convection_level(
+        sounding, moisture_ratio, theta_ml, q_ml
+    )
+    
     if z_fc is None:
         return None
-
+    
     mean_wind_mps = _entrained_layer_mean_wind_speed(z_fc, sounding)
-
+    
     if mean_wind_mps is None:
         return None
-
+    
     pft_val = _pft_formula(z_fc, p_fc, mean_wind_mps, d_theta_fc, theta_fc, p_sfc)
-
+    
     return pft_val
 
+
 def _entrained_mixed_layer(sounding):
-
+    
     elevation = sounding.profile.elevation
-
+    
     ps = sounding.profile.pressure
     zs = sounding.profile.hgt
     ts = sounding.profile.temp
     dps = sounding.profile.dewpoint
-
+    
     # Check if the first two levels are the same, and skip one if they are
     if len(zs) >= 2 and zs[0] == zs[1]:
         ps = ps[1:]
         zs = zs[1:]
         ts = ts[1:]
         dps = dps[1:]
-
+    
     try:
         p_sfc = next(p for p in ps if p is not None)
     except StopIteration:
         return (None, None, None)
-
-    max_p = p_sfc - 50.0 # Used to enforce at least a 50 hPa mixed layer is used.
-
+    
+    max_p = p_sfc - 50.0                                                                    # Used to enforce at least a 50 hPa mixed layer is used.
+    
     data_rows = zip(ps, zs, ts, dps)
-    # Remove levels with missing data
+                                                                                            # Remove levels with missing data
     data_rows = (row for row in data_rows if all(x is not None for x in row))
-    # Convert to AGL, specific humidity, and potential temperature
+                                                                                            # Convert to AGL, specific humidity, and potential temperature
     data_rows = ((p, z - elevation, wxf.theta_kelvin(p, t), wxf.specific_humidity(dp, p)) \
             for p, z, t, dp in data_rows)
-
+    
     data_rows0, data_rows1 = itertools.tee(data_rows)
-    next(data_rows1) # This should always be one level above!
+    next(data_rows1)                                                                        # This should always be one level above!
     data_row_pairs = zip(data_rows0, data_rows1)
-
+    
     sum_theta = 0.0
     sum_q = 0.0
-
+    
     def update_running_average(row_pair):
         nonlocal sum_theta
         nonlocal sum_q
-
+        
         row0, row1 = row_pair
         p0, h0, theta0, q0 = row0
         p1, h1, theta1, q1 = row1
-
+        
         dh = h1 - h0
         assert dh > 0.0
-
+        
         sum_theta += (theta0 * h0 + theta1 * h1) * dh
         sum_q += (q0 * h0 + q1 * h1) * dh
-
+        
         h_sq = h1 * h1
         avg_theta = sum_theta / h_sq
         avg_q = sum_q / h_sq
-
+        
         return (p1, h1, avg_theta, avg_q)
-
+    
     avg_vals = (update_running_average(row_pair) for row_pair in data_row_pairs)
-    # Ensure we get to the top of that minimum mixed layer.
+                                                                                            # Ensure we get to the top of that minimum mixed layer.
     avg_vals = (vals for vals in avg_vals if vals[0] < max_p)
-
+    
     def convert_to_lcl_pressure(row):
         p, h, avg_theta, avg_q = row
-
+        
         t = wxf.temperature_c_from_theta(avg_theta, p_sfc)
         dp = wxf.dew_point_from_p_and_specific_humidity(p_sfc, avg_q)
-
+        
         p_lcl, _ = wxf.press_and_temp_k_at_lcl(t, dp, p_sfc)
         if p_lcl is None:
             return None
-
+        
         return (p, h, avg_theta, avg_q, p_lcl)
-
+    
     avg_vals = (convert_to_lcl_pressure(row) for row in avg_vals if avg_vals is not None)
-
+    
     avg_vals0, avg_vals1 = itertools.tee(avg_vals)
     try:
         next(avg_vals1)
     except StopIteration:
         return (None, None, None)
-
+    
     for row0, row1 in zip(avg_vals0, avg_vals1):
         p0, h0, avg_theta0, avg_q0, p_lcl0 = row0
         p1, h1, avg_theta1, avg_q1, p_lcl1 = row1
-
+        
         if p0 > p_lcl0 and p1 < p_lcl1:
-
+            
             return (avg_theta0, avg_q0, p_sfc)
-
+    
     return (None, None, None)
 
 
 def _free_convection_level(sounding, moisture_ratio, theta_ml, q_ml):
-
+    
     SP_BETA_MAX = 0.25
     DELTA_BETA = 0.01
-
+    
     def apply_beta(beta):
         theta_sp = (1.0 + beta) * theta_ml
         q_sp_val = q_ml + beta / moisture_ratio / 1000.0 * theta_ml
-
+        
         return (theta_sp, q_sp_val)
-
+    
     low_beta = float('nan')
     high_beta = float('nan')
     beta = 0.0
     while beta <= SP_BETA_MAX:
-
+        
         th_sp, q_sp = apply_beta(beta)
-
+        
         p, t = _theta_q_to_p_t(th_sp, q_sp)
-
+        
         sp_theta_e = wxf.theta_e_kelvin(t, t, p)
         if sp_theta_e is None: continue
-
+        
         meets_theta_e_requirements = _is_free_convecting(sounding, p, sp_theta_e)
-
+        
         if not meets_theta_e_requirements and math.isnan(high_beta):
             low_beta = beta
         elif meets_theta_e_requirements and math.isnan(high_beta):
             high_beta = beta
             break
-
+        
         beta += DELTA_BETA
-
+    
     if math.isnan(high_beta) or math.isnan(low_beta):
         return (None, None, None, None)
-
+    
     def find_my_root(b):
         th_sp, q_sp = apply_beta(b)
         p, t = _theta_q_to_p_t(th_sp, q_sp)
-
+        
         sp_theta_e = wxf.theta_e_kelvin(t, t, p)
         if sp_theta_e is None:
             return None
-
+        
         min_diff = _min_temperature_diff_to_max_cloud_top_temperature(sounding, p, sp_theta_e)
-
+        
         if min_diff is None:
             return None
         return min_diff - TEMPERATURE_BUFFER
-
+    
     beta = wxf.find_root(find_my_root, low_beta, high_beta)
-    if beta is None: 
+    if beta is None:
         return (None, None, None, None)
     assert low_beta <= beta and beta <= high_beta
-
+    
     theta_fc, q_sp = apply_beta(beta)
-
+    
     d_theta_fc = theta_fc - theta_ml
     p_fc, t_fc = _theta_q_to_p_t(theta_fc, q_sp)
-
+    
     elevation = sounding.profile.elevation
-
+    
     low_idx = 0
     high_idx = 0
-
+    
     ps = sounding.profile.pressure
     zs = sounding.profile.hgt
-
-    for p, z, i in zip(ps, zs, range(0,len(ps))):
+    
+    for p, z, i in zip(ps, zs, range(0, len(ps))):
         if p is not None and z is not None:
             if high_idx == 0 and p > p_fc:
                 low_idx = i
@@ -893,51 +895,53 @@ def _free_convection_level(sounding, moisture_ratio, theta_ml, q_ml):
                 break
     if high_idx == 0:
         return (None, None, None, None)
-
+    
     low_p = ps[low_idx]
     low_z = zs[low_idx]
     high_p = ps[high_idx]
     high_z = zs[high_idx]
-
-    z_fc_asl = (high_z - low_z)/(high_p - low_p)*(p_fc - low_p) + low_z
+    
+    z_fc_asl = (high_z - low_z) / (high_p - low_p) * (p_fc - low_p) + low_z
     z_fc = z_fc_asl - elevation
-
-    return(z_fc, p_fc, theta_fc, d_theta_fc)
+    
+    return (z_fc, p_fc, theta_fc, d_theta_fc)
 
 
 def _theta_q_to_p_t(theta, q):
-
+    
     def diff(p):
         t = wxf.temperature_c_from_theta(theta, p)
         dp = wxf.dew_point_from_p_and_specific_humidity(p, q)
-
+        
         return t - dp
-
+    
     p = wxf.find_root(diff, 1080, 100)
     if p is None:
         return (None, None)
-
+    
     t = wxf.temperature_c_from_theta(theta, p)
-
+    
     return (p, t)
 
 
 def _is_free_convecting(sounding, p, theta_e):
     min_diff = _min_temperature_diff_to_max_cloud_top_temperature(sounding, p, theta_e)
-
+    
     if min_diff is None:
         return False
     return min_diff >= TEMPERATURE_BUFFER
 
 
 TEMPERATURE_BUFFER = 0.5
+
+
 def _min_temperature_diff_to_max_cloud_top_temperature(sounding, starting_pressure, theta_e):
     MAX_PLUME_TOP_T = -20.0
-
+    
     pp = sounding.profile.pressure
     tp = sounding.profile.temp
     dpp = sounding.profile.dewpoint
-
+    
     rows = zip(pp, tp, dpp)
     # Filter out rows with missing data
     rows = (row for row in rows if all(x is not None for x in row))
@@ -951,7 +955,7 @@ def _min_temperature_diff_to_max_cloud_top_temperature(sounding, starting_pressu
     # enumerate the rows so we can force a minimum amount.
     rows = enumerate(rows)
     # Select those that are warmer than the maximum required plume top temperature.
-    rows = itertools.takewhile(lambda row: row[1][3] >= MAX_PLUME_TOP_T or row[0] < 2, rows) 
+    rows = itertools.takewhile(lambda row: row[1][3] >= MAX_PLUME_TOP_T or row[0] < 2, rows)
     # unpack from the enumeration
     rows = (row[1] for row in rows)
     # Convert to virtual temperature.
@@ -959,74 +963,74 @@ def _min_temperature_diff_to_max_cloud_top_temperature(sounding, starting_pressu
             for p, t, dp, pcl_t in rows)
     # Map them to the temperature difference
     diffs = (pcl_vt - e_vt for e_vt, pcl_vt in rows)
-
+    
     min_diff = min(diffs, default=1000.0)
     if min_diff == 1000.0:
         return None
-
+    
     return min_diff
 
 
 def _entrained_layer_mean_wind_speed(z_fc, sounding):
     elevation = sounding.profile.elevation
-
+    
     z_fc = z_fc + elevation
-
+    
     ps = sounding.profile.pressure
     zs = sounding.profile.hgt
     us = sounding.profile.uWind
     vs = sounding.profile.vWind
-
+    
     rows = zip(ps, zs, us, vs)
     # Filter out rows with missing data
     rows = (row for row in rows if all(x is not None for x in row))
     # Filter out rows below the z_fc
     rows = ((p, u, v) for p, z, u, v in rows if z <= z_fc)
-
+    
     rows0, rows1 = itertools.tee(rows)
     try:
         next(rows1)
     except StopIteration:
         return None
-
+    
     layers = zip(rows0, rows1)
     sum_p = 0.0
     sum_u = 0.0
     sum_v = 0.0
-
+    
     # integrate with the trapezoid rule
     for layer in layers:
         row0, row1 = layer
         p0, u0, v0 = row0
         p1, u1, v1 = row1
-
+        
         dp = p1 - p0
         sum_u += (u0 * p0 + u1 * p1) * dp
         sum_v += (v0 * p0 + v1 * p1) * dp
         sum_p += (p0 + p1) * dp
-
+    
     # Divide by 2 cancel each other out inthe average equation.
     avg_u = sum_u / sum_p
     avg_v = sum_v / sum_p
-
-    avg_spd = math.sqrt(avg_u ** 2 + avg_v ** 2)
-
+    
+    avg_spd = math.sqrt(avg_u**2 + avg_v**2)
+    
     return avg_spd
 
 
 def _pft_formula(z_fc_meters, p_fc, mean_wind_mps, d_theta_fc, theta_fc, p_sfc):
-
+    
     z_fc_km = wxf.m_to_km(z_fc_meters)
-
-    PFT_CONST = 397.3 # Constant component of equation 25 from table 2 in Tory & Kepert, 2021.
-
-    # Equation 28
+    
+    PFT_CONST = 397.3   # Constant component of equation 25 from table 2 in Tory & Kepert, 2021.
+    
+                            # Equation 28
     p_c = p_sfc - (p_sfc - p_fc) / (1.0 + 0.32 * 0.4)
-
-    # Equation 26 (divide by 10 because pressure is in hPa)
-    density = p_c / 10.0 / (wxf.R * theta_fc) * ((1000.0 / p_c) ** (wxf.R / wxf.cp))
-
-    return PFT_CONST * density * (z_fc_km ** 2) * mean_wind_mps * d_theta_fc
+    
+                            # Equation 26 (divide by 10 because pressure is in hPa)
+    density = p_c / 10.0 / (wxf.R * theta_fc) * ((1000.0 / p_c)**(wxf.R / wxf.cp))
+    
+    return PFT_CONST * density * (z_fc_km**2) * mean_wind_mps * d_theta_fc
 
 
 if __name__ == "__main__":
@@ -1057,25 +1061,24 @@ if __name__ == "__main__":
                 pft_str = "None"
             else:
                 pft_str = "{:0.0f} GW".format(pft_val)
-
+            
             print("{} - {}".format(snd.profile.time, pft_str))
 
 #        for snd in test_data:
 #            vt = snd.profile.time
-#            
+#
 #            # Create a mixed layer parcel
 #            pcl = mixed_layer_parcel(snd)
 #            pcl = pcl._replace(temperature=pcl.temperature + 10)
 #            parcel_profile = lift_parcel(pcl, snd)
 #            res = analyze_parcel_ascent(parcel_profile)
-#            
+#
 #            if res.percent_wet_cape() is None:
 #                wet_pct = "None"
 #            else:
 #                wet_pct = "%3.0f%%" % (res.percent_wet_cape() * 100,)
-#            
+#
 #            print("%s, Pct Wet CAPE - %s" % (res, wet_pct))
-#        
+#
 #        for snd in test_data:
 #            print(blow_up_analysis(snd, None))
-
