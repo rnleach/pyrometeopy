@@ -690,7 +690,7 @@ def blow_up_analysis(sounding, moisture_ratio):
     return BlowUpAnalysis(dt_cloud, dt_lmib_blow_up, dz_lmib_blow_up, p1_pw)
 
 
-def pft(sounding, moisture_ratio):
+def pft(sounding, moisture_ratio, fire_elevation=None):
     """Calculate the Pyrocumulonimbus Fire-power Threshold (PFT)
 
     Reference Tory & Kepert, 2021.
@@ -699,24 +699,26 @@ def pft(sounding, moisture_ratio):
     sounding is the sounding we want to do the analysis for.
     moisture_ratio how much fire moisture to add, which depends on the
         heating. A value of 10.0 means add 1 g/kg of moisture for every
-        10K of heating. None implies adding no moisture at all.
+        10K of heating.
+    fire_elevation is the elevation the fire is burning at. This will
+        treated as the surface of the sounding.
 
 
     Returns the PFT in gigawatts.
     """
-    theta_ml, q_ml, p_sfc = _entrained_mixed_layer(sounding)
+    theta_ml, q_ml, p_sfc = _entrained_mixed_layer(sounding, fire_elevation)
     
     if theta_ml is None:
         return None
     
     z_fc, p_fc, theta_fc, d_theta_fc = _free_convection_level(
-        sounding, moisture_ratio, theta_ml, q_ml
+        sounding, moisture_ratio, theta_ml, q_ml, fire_elevation
     )
     
     if z_fc is None:
         return None
     
-    mean_wind_mps = _entrained_layer_mean_wind_speed(z_fc, sounding)
+    mean_wind_mps = _entrained_layer_mean_wind_speed(z_fc, sounding, fire_elevation)
     
     if mean_wind_mps is None:
         return None
@@ -726,9 +728,12 @@ def pft(sounding, moisture_ratio):
     return pft_val
 
 
-def _entrained_mixed_layer(sounding):
+def _entrained_mixed_layer(sounding, fire_elevation):
     
-    elevation = sounding.profile.elevation
+    if fire_elevation is None:
+        elevation = sounding.profile.elevation
+    else:
+        elevation = fire_elevation
     
     ps = sounding.profile.pressure
     zs = sounding.profile.hgt
@@ -742,6 +747,18 @@ def _entrained_mixed_layer(sounding):
         ts = ts[1:]
         dps = dps[1:]
     
+    # Trim out everything below the fire elevation
+    if fire_elevation is not None:
+        trim_idx = 0
+        for i, z in enumerate(zs):
+            if z >= fire_elevation:
+                trim_idx = i
+                break
+        ps = ps[trim_idx:]
+        zs = zs[trim_idx:]
+        ts = ts[trim_idx:]
+        dps = dps[trim_idx:]
+    
     try:
         p_sfc = next(p for p in ps if p is not None)
     except StopIteration:
@@ -750,9 +767,7 @@ def _entrained_mixed_layer(sounding):
     max_p = p_sfc - 50.0                                                                    # Used to enforce at least a 50 hPa mixed layer is used.
     
     data_rows = zip(ps, zs, ts, dps)
-                                                                                            # Remove levels with missing data
     data_rows = (row for row in data_rows if all(x is not None for x in row))
-                                                                                            # Convert to AGL, specific humidity, and potential temperature
     data_rows = ((p, z - elevation, wxf.theta_kelvin(p, t), wxf.specific_humidity(dp, p)) \
             for p, z, t, dp in data_rows)
     
@@ -818,7 +833,7 @@ def _entrained_mixed_layer(sounding):
     return (None, None, None)
 
 
-def _free_convection_level(sounding, moisture_ratio, theta_ml, q_ml):
+def _free_convection_level(sounding, moisture_ratio, theta_ml, q_ml, fire_elevation):
     
     SP_BETA_MAX = 0.25
     DELTA_BETA = 0.01
@@ -878,7 +893,10 @@ def _free_convection_level(sounding, moisture_ratio, theta_ml, q_ml):
     d_theta_fc = theta_fc - theta_ml
     p_fc, t_fc = _theta_q_to_p_t(theta_fc, q_sp)
     
-    elevation = sounding.profile.elevation
+    if fire_elevation is None:
+        elevation = sounding.profile.elevation
+    else:
+        elevation = fire_elevation
     
     low_idx = 0
     high_idx = 0
@@ -971,8 +989,11 @@ def _min_temperature_diff_to_max_cloud_top_temperature(sounding, starting_pressu
     return min_diff
 
 
-def _entrained_layer_mean_wind_speed(z_fc, sounding):
-    elevation = sounding.profile.elevation
+def _entrained_layer_mean_wind_speed(z_fc, sounding, fire_elevation):
+    if fire_elevation is None:
+        elevation = sounding.profile.elevation
+    else:
+        elevation = fire_elevation
     
     z_fc = z_fc + elevation
     
@@ -980,6 +1001,18 @@ def _entrained_layer_mean_wind_speed(z_fc, sounding):
     zs = sounding.profile.hgt
     us = sounding.profile.uWind
     vs = sounding.profile.vWind
+    
+    # Trim out everything below the fire elevation
+    if fire_elevation is not None:
+        trim_idx = 0
+        for i, z in enumerate(zs):
+            if z >= fire_elevation:
+                trim_idx = i
+                break
+        ps = ps[trim_idx:]
+        zs = zs[trim_idx:]
+        us = us[trim_idx:]
+        vs = vs[trim_idx:]
     
     rows = zip(ps, zs, us, vs)
     # Filter out rows with missing data
@@ -1057,12 +1090,21 @@ if __name__ == "__main__":
         
         for snd in test_data:
             pft_val = pft(snd, 15.0)
+            pft_val_high = pft(snd, 15.0, 2000)
+            
             if pft_val is None:
                 pft_str = "None"
             else:
                 pft_str = "{:0.0f} GW".format(pft_val)
             
-            print("{} - {}".format(snd.profile.time, pft_str))
+            if pft_val_high is None:
+                pft_str_high = "None"
+            else:
+                pft_str_high = "{:0.0f} GW".format(pft_val_high)
+            
+            print(
+                "{} - {} - 2000 meter elevation {}".format(snd.profile.time, pft_str, pft_str_high)
+            )
 
 #        for snd in test_data:
 #            vt = snd.profile.time
