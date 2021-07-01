@@ -96,6 +96,14 @@ def mps_to_knots(mps):
     return mps / 0.51444
 
 
+def m_to_km(meters):
+    """Convert meters to kilometers."""
+    if meters is None:
+        return None
+
+    return meters / 1000
+
+
 def theta_kelvin(pressure_hpa, t_c):
     """Calculate the potential temperature in Kelvin.
 
@@ -367,11 +375,14 @@ def temperature_c_from_theta_e_saturated_and_pressure(pressure_hpa, theta_e_k):
             return None
         return te - theta_e_k
     
-    return __find_root(func_to_minimize, -80.0, 50.0)
+    try:
+        return find_root(func_to_minimize, -80.0, 50.0)
+    except Exception:
+        return None
 
 
 # FIXME: Update this to use Brent's method, which usually converges faster.
-def __find_root(func, low_val, high_val):
+def find_root(func, low_val, high_val):
     """Bisection algorithm for finding the root of an equation.
     
     low_val is the left bracket, func(low_val) < 0
