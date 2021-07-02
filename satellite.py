@@ -7,8 +7,31 @@ import os.path as path
 import s3fs
 
 
-def download_goes_hotspot_characterization(folder, start, end, satellite="G17"):
-    """Download hotspot characterization data for Amazon AWS S3.
+def download_goes_hotspot_characterization(folder, start, end, satellite="G17", full_disk=False):
+    """Download hotspot characterization data from Amazon AWS S3.
+
+    Queries the appropriate S3 folders for file names. If they 
+    already exist in the specified folder, they are not 
+    downloaded again.
+
+    Arguments:
+    folder is the location to store the files
+    start is the start time
+    end is the end time and must be after start
+    satellite must be "G17" or "G16" to choose which satellite to use.
+    full_disk means to use the full disk instead of the conus imagery.
+
+    Returns: A list of file names on the local machine for your processing.
+    """
+    if full_disk:
+        product = 'ABI-L2-FDCF'
+    else:
+        product = 'ABI-L2-FDCC'
+
+    return download_goes_data(folder, start, end, product, satellite)
+
+def download_goes_data(folder, start, end, product, satellite="G17"):
+    """Download GOES data from Amazon AWS S3.
 
     Queries the appropriate S3 folders for file names. If they 
     already exist in the specified folder, they are not 
@@ -27,13 +50,28 @@ def download_goes_hotspot_characterization(folder, start, end, satellite="G17"):
     assert isinstance(end, dt.datetime)
     assert end > start
     assert satellite == "G17" or satellite == "G16"
+
+    GOES_16_OPERATIONAL = dt.datetime(2017, 12, 18, 17, 30, tzinfo=dt.timezone.utc)
+    GOES_17_OPERATIONAL = dt.datetime(2019, 2, 12, 18, tzinfo=dt.timezone.utc)
     
+    # Satellite specific checks and setup.
     if satellite == "G17":
+        
+        if end < GOES_17_OPERATIONAL:
+            return []
+        if start < GOES_17_OPERATIONAL:
+            start = GOES_17_OPERATIONAL
+
         bucket = 's3://noaa-goes17'
+
     elif satellite == "G16":
+
+        if end < GOES_16_OPERATIONAL:
+            return []
+        if start < GOES_16_OPERATIONAL:
+            start = GOES_16_OPERATIONAL
+
         bucket = 's3://noaa-goes16'
-    
-    product = 'ABI-L2-FDCC'
     
     # Use the anonymous credentials to access public data
     fs = s3fs.S3FileSystem(anon=True)
@@ -86,32 +124,36 @@ class BoundingBox:
         
         return
 
+    def sw_corner(self):
+        """Get the southwest corner as a tuple (lat, lon)."""
+        return (self.min_lat, self.min_lon)
 
-def total_fire_power_time_series(files, bounding_boxes):
+    def ne_corner(self):
+        """Get the northeast corner as a tuple (lat, lon)."""
+        return (self.max_lat, self.max_lon)
+
+    def corners(self):
+        """Get a tuple of the corners, each themselves a tuple."""
+        return (self.sw_corner(), self.ne_corner())
+
+
+def total_fire_power_time_series(files, bounding_box):
     """Create time series of total fire power.
 
     Arguments:
     files is a list of NetCDF4 files with fire power data.
-    bounding_boxes is a collection bounding boxes to gather
-        data for.
+        Either the paths or opened nc.Dataset's can be
+        passed in.
+    bounding_box is the bounding boxe to gather data for.
 
-    Returns: A dictionary where the bounding box names are 
-    the keys and the values numpy arrays with valid time
-    and fire power. 
-
-    {"name":(ndarray of valid times, ndarray of total fire power), ..}
+    Returns: A dictionary where valid time is the key and
+    the value is the fire power.
     """
-    if not isinstance(bounding_boxes, (list, tuple)):
-        bbs = (bounding_boxes,)
-    else:
-        bbs = bounding_boxes
+
+    assert isinstance(bounding_box, BoundingBox)
+    bb = bounding_box
     
-    result_times = {}
-    result_powers = {}
-    for bb in bbs:
-        result_times[bb.name] = []
-        result_powers[bb.name] = []
-    
+    results = {}
     for f in files:
         if isinstance(f, nc.Dataset):
             nc_data = f
@@ -121,21 +163,18 @@ def total_fire_power_time_series(files, bounding_boxes):
         try:
             time = get_valid_time(nc_data)
 
-            for bb in bbs:
-                    
-                if time >= bb.start and time <= bb.end:
-                    total_power = get_total_fire_power(nc_data, bb)
-                    
-                    result_times[bb.name].append(time)
-                    result_powers[bb.name].append(total_power)
+            if time >= bb.start and time <= bb.end:
+                total_power = get_total_fire_power(nc_data, bb)
+
+                results[time] = total_power
 
         except Exception:
-            print("Error, skipping {}".format(f))
+            if isinstance(f, nc.Dataset):
+                msg = f.filepath()
+            else:
+                msg = f
+            print("Error, skipping {}".format(msg))
             continue
-    
-    results = {}
-    for area in result_times.keys():
-        results[area] = (np.array(result_times[area]), np.array(result_powers[area]))
     
     return results
 
@@ -153,11 +192,14 @@ def get_valid_time(nc_dataset):
 
     Returns: the valid time as a datetime.datetime object.
     """
-    time = nc_dataset.variables['time_bounds'][:]
-    time = sum(time) / len(time)
-    time = _SATELLITE_EPOCH + dt.timedelta(seconds=time)
-    
-    return time
+    try:
+        time = nc_dataset.variables['time_bounds'][:]
+        time = sum(time) / len(time)
+        time = _SATELLITE_EPOCH + dt.timedelta(seconds=time)
+        
+        return time
+    except Exception:
+        return None
 
 
 # EPOCH - satellite data stored in NetCDF files uses this datetime as
@@ -214,8 +256,8 @@ def _get_grid_cell_indexes(proj, xs, ys, bounding_box):
     lon0 = proj.longitude_of_projection_origin
     
     # Unpack values from the area we want to grab the data
-    min_lat, min_lon = bounding_box.min_lat, bounding_box.min_lon
-    max_lat, max_lon = bounding_box.max_lat, bounding_box.max_lon
+    min_lat, min_lon = bounding_box.sw_corner()
+    max_lat, max_lon = bounding_box.ne_corner()
     
     # Calculate the lat and lon grids
     xs, ys = np.meshgrid(xs, ys)
