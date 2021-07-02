@@ -109,8 +109,8 @@ def total_fire_power_time_series(files, bounding_boxes):
     result_times = {}
     result_powers = {}
     for bb in bbs:
-        result_times[bb._name] = []
-        result_powers[bb._name] = []
+        result_times[bb.name] = []
+        result_powers[bb.name] = []
     
     for f in files:
         if isinstance(f, nc.Dataset):
@@ -124,8 +124,8 @@ def total_fire_power_time_series(files, bounding_boxes):
             if time >= bb.start and time <= bb.end:
                 total_power = get_total_fire_power(nc_data, bb)
                 
-                result_times[bb._name].append(time)
-                result_powers[bb._name].append(total_power)
+                result_times[bb.name].append(time)
+                result_powers[bb.name].append(total_power)
     
     results = {}
     for area in result_times.keys():
