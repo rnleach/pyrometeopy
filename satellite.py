@@ -118,14 +118,20 @@ def total_fire_power_time_series(files, bounding_boxes):
         else:
             nc_data = nc.Dataset(f)
         
-        for bb in bbs:
+        try:
             time = get_valid_time(nc_data)
-            
-            if time >= bb.start and time <= bb.end:
-                total_power = get_total_fire_power(nc_data, bb)
-                
-                result_times[bb.name].append(time)
-                result_powers[bb.name].append(total_power)
+
+            for bb in bbs:
+                    
+                if time >= bb.start and time <= bb.end:
+                    total_power = get_total_fire_power(nc_data, bb)
+                    
+                    result_times[bb.name].append(time)
+                    result_powers[bb.name].append(total_power)
+
+        except Exception:
+            print("Error, skipping {}".format(f))
+            continue
     
     results = {}
     for area in result_times.keys():
