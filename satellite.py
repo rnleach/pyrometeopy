@@ -28,8 +28,9 @@ def download_goes_hotspot_characterization(folder, start, end, satellite="G17", 
         product = 'ABI-L2-FDCF'
     else:
         product = 'ABI-L2-FDCC'
-
+    
     return download_goes_data(folder, start, end, product, satellite)
+
 
 def download_goes_data(folder, start, end, product, satellite="G17"):
     """Download GOES data from Amazon AWS S3.
@@ -53,7 +54,7 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
     assert isinstance(end, dt.datetime)
     assert end > start
     assert satellite == "G17" or satellite == "G16"
-
+    
     GOES_16_OPERATIONAL = dt.datetime(2017, 12, 18, 17, 30, tzinfo=dt.timezone.utc)
     GOES_17_OPERATIONAL = dt.datetime(2019, 2, 12, 18, tzinfo=dt.timezone.utc)
     
@@ -64,21 +65,21 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
             return []
         if start < GOES_17_OPERATIONAL:
             start = GOES_17_OPERATIONAL
-
+        
         bucket = 's3://noaa-goes17'
-
+    
     elif satellite == "G16":
-
+        
         if end < GOES_16_OPERATIONAL:
             return []
         if start < GOES_16_OPERATIONAL:
             start = GOES_16_OPERATIONAL
-
+        
         bucket = 's3://noaa-goes16'
     
     # Use the anonymous credentials to access public data
     fs = s3fs.S3FileSystem(anon=True)
-
+    
     # Get a list of files we already have downloaded.
     current_files = tuple(f for f in os.listdir(folder) if "ABI-L2" in f and ".nc" in f)
     
@@ -91,16 +92,18 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
         local_files_this_hour = (f for f in current_files if satellite in f)
         local_files_this_hour = (f for f in local_files_this_hour if time_prefix in f)
         local_files_this_hour = tuple(path.join(folder, f) for f in local_files_this_hour)
-        if len(local_files_this_hour) >= 11: # Should be 12 per hour for conus
+        if len(local_files_this_hour) >= 11:                                   # Should be 12 per hour for conus
             result_list.extend(local_files_this_hour)
-
+        
         else:
-
-            print("Need to download some files for {} {}: only have {}".format(
-                satellite,
-                current_time.strftime("%Y-%m-%d %H (%j)"),
-                len(local_files_this_hour)))
-
+            
+            print(
+                "Need to download some files for {} {}: only have {}".format(
+                    satellite, current_time.strftime("%Y-%m-%d %H (%j)"),
+                    len(local_files_this_hour)
+                )
+            )
+            
             time_path = current_time.strftime("%Y/%j/%H")
             remote_dir = "{}/{}/{}".format(bucket, product, time_path)
             
@@ -117,7 +120,7 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
                     print("Downloading", local)
                     fs.get(remote, local)
         
-        # Move ahead an hour
+                                                                                       # Move ahead an hour
         current_time += dt.timedelta(hours=1)
     
     return result_list
@@ -144,15 +147,15 @@ class BoundingBox:
         self.name = name
         
         return
-
+    
     def sw_corner(self):
         """Get the southwest corner as a tuple (lat, lon)."""
         return (self.min_lat, self.min_lon)
-
+    
     def ne_corner(self):
         """Get the northeast corner as a tuple (lat, lon)."""
         return (self.max_lat, self.max_lon)
-
+    
     def corners(self):
         """Get a tuple of the corners, each themselves a tuple."""
         return (self.sw_corner(), self.ne_corner())
@@ -170,7 +173,7 @@ def total_fire_power_time_series(files, bounding_box):
     Returns: A dictionary where valid time is the key and
     the value is the fire power.
     """
-
+    
     assert isinstance(bounding_box, BoundingBox)
     bb = bounding_box
     
@@ -183,12 +186,12 @@ def total_fire_power_time_series(files, bounding_box):
         
         try:
             time = get_valid_time(nc_data)
-
+            
             if time >= bb.start and time <= bb.end:
                 total_power = get_total_fire_power(nc_data, bb)
-
+                
                 results[time] = total_power
-
+        
         except Exception:
             if isinstance(f, nc.Dataset):
                 msg = f.filepath()
