@@ -3,8 +3,7 @@
 import datetime as dt
 import netCDF4 as nc
 import numpy as np
-import os
-import os.path as path
+from pathlib import Path
 import s3fs
 
 
@@ -54,6 +53,11 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
     assert isinstance(end, dt.datetime)
     assert end > start
     assert satellite == "G17" or satellite == "G16"
+
+    if not isinstance(folder, Path):
+        folder = Path(folder)
+
+    assert folder.is_dir()
     
     GOES_16_OPERATIONAL = dt.datetime(2017, 12, 18, 17, 30, tzinfo=dt.timezone.utc)
     GOES_17_OPERATIONAL = dt.datetime(2019, 2, 12, 18, tzinfo=dt.timezone.utc)
@@ -81,7 +85,7 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
     fs = s3fs.S3FileSystem(anon=True)
     
     # Get a list of files we already have downloaded.
-    current_files = tuple(f for f in os.listdir(folder) if "ABI-L2" in f and ".nc" in f)
+    current_files = tuple(f for f in folder.iterdir() if "ABI-L2" in f.name and f.suffix == ".nc")
     
     current_time = start
     result_list = []
@@ -89,9 +93,8 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
         
         # Check to see how many matching files we have
         time_prefix = current_time.strftime("_s%Y%j%H")
-        local_files_this_hour = (f for f in current_files if satellite in f)
-        local_files_this_hour = (f for f in local_files_this_hour if time_prefix in f)
-        local_files_this_hour = tuple(path.join(folder, f) for f in local_files_this_hour)
+        local_files_this_hour = (f for f in current_files if satellite in f.name)
+        local_files_this_hour = tuple(f for f in local_files_this_hour if time_prefix in f.name)
         if len(local_files_this_hour) >= 11:                                   # Should be 12 per hour for conus
             result_list.extend(local_files_this_hour)
         
@@ -109,14 +112,14 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
             
             remote_files = np.array(fs.ls(remote_dir))
             local_files = (f.split('/')[-1] for f in remote_files)
-            local_files = (path.join(folder, f) for f in local_files)
+            local_files = (folder / f for f in local_files)
             
             files = tuple(zip(remote_files, local_files))
             
             for remote, local in files:
                 result_list.append(local)
                 
-                if not path.exists(local):
+                if not local.exists() or not local.is_file():
                     print("Downloading", local)
                     fs.get(remote, local)
         
