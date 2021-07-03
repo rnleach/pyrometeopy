@@ -3,6 +3,7 @@
 import datetime as dt
 import netCDF4 as nc
 import numpy as np
+import os
 import os.path as path
 import s3fs
 
@@ -33,7 +34,9 @@ def download_goes_hotspot_characterization(folder, start, end, satellite="G17", 
 def download_goes_data(folder, start, end, product, satellite="G17"):
     """Download GOES data from Amazon AWS S3.
 
-    Queries the appropriate S3 folders for file names. If they 
+    First checks the local archive in 'folder' and checks for at least
+    11 files for a date and hour. If there are not enough files, then 
+    it queries the appropriate S3 folders for file names. If they 
     already exist in the specified folder, they are not 
     downloaded again.
 
@@ -75,26 +78,44 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
     
     # Use the anonymous credentials to access public data
     fs = s3fs.S3FileSystem(anon=True)
+
+    # Get a list of files we already have downloaded.
+    current_files = tuple(f for f in os.listdir(folder) if "ABI-L2" in f and ".nc" in f)
     
     current_time = start
     result_list = []
     while current_time < end:
         
-        time_path = current_time.strftime("%Y/%j/%H")
-        remote_dir = "{}/{}/{}".format(bucket, product, time_path)
-        
-        remote_files = np.array(fs.ls(remote_dir))
-        local_files = (f.split('/')[-1] for f in remote_files)
-        local_files = (path.join(folder, f) for f in local_files)
-        
-        files = tuple(zip(remote_files, local_files))
-        
-        for remote, local in files:
-            result_list.append(local)
+        # Check to see how many matching files we have
+        time_prefix = current_time.strftime("_s%Y%j%H")
+        local_files_this_hour = (f for f in current_files if satellite in f)
+        local_files_this_hour = (f for f in local_files_this_hour if time_prefix in f)
+        local_files_this_hour = tuple(path.join(folder, f) for f in local_files_this_hour)
+        if len(local_files_this_hour) >= 11: # Should be 12 per hour for conus
+            result_list.extend(local_files_this_hour)
+
+        else:
+
+            print("Need to download some files for {} {}: only have {}".format(
+                satellite,
+                current_time.strftime("%Y-%m-%d %H (%j)"),
+                len(local_files_this_hour)))
+
+            time_path = current_time.strftime("%Y/%j/%H")
+            remote_dir = "{}/{}/{}".format(bucket, product, time_path)
             
-            if not path.exists(local):
-                print("Downloading", local)
-                fs.get(remote, local)
+            remote_files = np.array(fs.ls(remote_dir))
+            local_files = (f.split('/')[-1] for f in remote_files)
+            local_files = (path.join(folder, f) for f in local_files)
+            
+            files = tuple(zip(remote_files, local_files))
+            
+            for remote, local in files:
+                result_list.append(local)
+                
+                if not path.exists(local):
+                    print("Downloading", local)
+                    fs.get(remote, local)
         
         # Move ahead an hour
         current_time += dt.timedelta(hours=1)
