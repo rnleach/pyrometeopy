@@ -53,12 +53,119 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
     assert isinstance(end, dt.datetime)
     assert end > start
     assert satellite == "G17" or satellite == "G16"
-
+    
     if not isinstance(folder, Path):
         folder = Path(folder)
-
+    
     assert folder.is_dir()
     
+    start, bucket = _validate_satellite_dates(satellite, start, end)
+    if start is None:
+        return []
+    
+    # Get a list of files we already have downloaded.
+    current_files = tuple(f for f in folder.iterdir() if "ABI-L2" in f.name and f.suffix == ".nc")
+    
+    # Files older than this are too old to be missing, and must be
+    # permanently missing. So we shouldn't check for them again, just
+    # remember that htey are missing so we can skip them.
+    too_old_to_be_missing = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)
+    
+    # The list of hours with missing data.
+    missing_data_path = folder / Path("missing_data.txt")
+    if missing_data_path.exists():
+        with open(missing_data_path, "r") as mdf:
+            missing_data = list(l.strip() for l in mdf if l.strip() != "")
+    else:
+        missing_data = []
+    
+    current_time = start
+    result_list = []
+    while current_time < end:
+        
+        # Check to see how many matching files we have
+        time_prefix = current_time.strftime("_s%Y%j%H")
+        missing_key = "{}{}".format(satellite, time_prefix)
+        local_files_this_hour = (f for f in current_files if satellite in f.name)
+        local_files_this_hour = tuple(f for f in local_files_this_hour if time_prefix in f.name)
+        
+        # Should be 12 per hour for CONUS 
+        if len(local_files_this_hour) >= 11:                                                   
+            result_list.extend(local_files_this_hour)
+        
+        elif missing_key not in missing_data:
+            
+            result_list.extend(
+                _download_files(
+                    current_time, bucket, product, folder, too_old_to_be_missing, missing_data,
+                    missing_key
+                )
+            )
+        
+        # Move ahead an hour
+        current_time += dt.timedelta(hours=1)
+    
+    # Remember the missing!
+    with open(missing_data_path, "w") as mdf:
+        for line in missing_data:
+            mdf.write(line)
+            mdf.write("\n")
+    
+    return result_list
+
+
+def _download_files(
+    current_time, s3_bucket, product, target_dir, too_old_to_be_missing, missing_data, missing_key
+):
+    """Download the files for the hour given by current_time.
+
+    The remote directory is built from current_time, s3_bucket, and product.
+    target_dir is the directory on the local file system to store downloaded
+        data.
+    too_old_to_be_missing and missing data keep track of files that are 
+        missing and very unlikely to ever be updated.
+
+    Returns a generator that yields the file name on the local file system of 
+    any downloaded files. If the target file was already downloaded, it just 
+    yields the local file name without redownloading it.
+    """
+    time_path = current_time.strftime("%Y/%j/%H")
+    remote_dir = "{}/{}/{}".format(s3_bucket, product, time_path)
+    
+    # Use the anonymous credentials to access public data
+    fs = s3fs.S3FileSystem(anon=True)
+    
+    remote_files = list(fs.ls(remote_dir))
+    local_files = (f.split('/')[-1] for f in remote_files)
+    local_files = (target_dir / f for f in local_files)
+    
+    files = tuple(zip(remote_files, local_files))
+    
+    # If there's some missing data, remember!
+    if len(files) < 11 and current_time < too_old_to_be_missing:
+        missing_data.append(missing_key)
+    
+    for remote, local in files:
+        
+        if not local.exists() or not local.is_file():
+            print("Downloading", local)
+            fs.get(remote, str(local))
+        
+        yield local
+    
+    return None
+
+
+def _validate_satellite_dates(satellite, start, end):
+    """Validate the start and end times for the satellite.
+
+    Uses the known operational dates of the satellites to
+    adjust the start date if needed. It also selects the
+    Amazon S3 bucket to use.
+
+    Returns: a tuple of (start, S3 bucket). If the start
+    and end times are invalid, it returns (None, None).
+    """
     GOES_16_OPERATIONAL = dt.datetime(2017, 12, 18, 17, 30, tzinfo=dt.timezone.utc)
     GOES_17_OPERATIONAL = dt.datetime(2019, 2, 12, 18, tzinfo=dt.timezone.utc)
     
@@ -66,7 +173,7 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
     if satellite == "G17":
         
         if end < GOES_17_OPERATIONAL:
-            return []
+            return (None, None)
         if start < GOES_17_OPERATIONAL:
             start = GOES_17_OPERATIONAL
         
@@ -75,58 +182,13 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
     elif satellite == "G16":
         
         if end < GOES_16_OPERATIONAL:
-            return []
+            return (None, None)
         if start < GOES_16_OPERATIONAL:
             start = GOES_16_OPERATIONAL
         
         bucket = 's3://noaa-goes16'
     
-    # Use the anonymous credentials to access public data
-    fs = s3fs.S3FileSystem(anon=True)
-    
-    # Get a list of files we already have downloaded.
-    current_files = tuple(f for f in folder.iterdir() if "ABI-L2" in f.name and f.suffix == ".nc")
-    
-    current_time = start
-    result_list = []
-    while current_time < end:
-        
-        # Check to see how many matching files we have
-        time_prefix = current_time.strftime("_s%Y%j%H")
-        local_files_this_hour = (f for f in current_files if satellite in f.name)
-        local_files_this_hour = tuple(f for f in local_files_this_hour if time_prefix in f.name)
-        if len(local_files_this_hour) >= 11:                                   # Should be 12 per hour for conus
-            result_list.extend(local_files_this_hour)
-        
-        else:
-            
-            print(
-                "Need to download some files for {} {}: only have {}".format(
-                    satellite, current_time.strftime("%Y-%m-%d %H (%j)"),
-                    len(local_files_this_hour)
-                )
-            )
-            
-            time_path = current_time.strftime("%Y/%j/%H")
-            remote_dir = "{}/{}/{}".format(bucket, product, time_path)
-            
-            remote_files = np.array(fs.ls(remote_dir))
-            local_files = (f.split('/')[-1] for f in remote_files)
-            local_files = (folder / f for f in local_files)
-            
-            files = tuple(zip(remote_files, local_files))
-            
-            for remote, local in files:
-                result_list.append(local)
-                
-                if not local.exists() or not local.is_file():
-                    print("Downloading", local)
-                    fs.get(remote, local)
-        
-                                                                                       # Move ahead an hour
-        current_time += dt.timedelta(hours=1)
-    
-    return result_list
+    return (start, bucket)
 
 
 class BoundingBox:
@@ -186,7 +248,7 @@ def total_fire_power_time_series(files, bounding_box):
             nc_data = f
         else:
             nc_data = nc.Dataset(f)
-        
+
         try:
             time = get_valid_time(nc_data)
             
@@ -195,12 +257,12 @@ def total_fire_power_time_series(files, bounding_box):
                 
                 results[time] = total_power
         
-        except Exception:
+        except Exception e:
             if isinstance(f, nc.Dataset):
                 msg = f.filepath()
             else:
                 msg = f
-            print("Error, skipping {}".format(msg))
+            print("Error, skipping {} for error {}".format(msg, e))
             continue
     
     return results
