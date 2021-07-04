@@ -72,7 +72,7 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
     too_old_to_be_missing = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)
     
     # The list of hours with missing data.
-    missing_data_path = folder / Path("missing_data.txt")
+    missing_data_path = folder / "missing_data.txt"
     if missing_data_path.exists():
         with open(missing_data_path, "r") as mdf:
             missing_data = list(l.strip() for l in mdf if l.strip() != "")
@@ -246,8 +246,11 @@ def total_fire_power_time_series(files, bounding_box):
     for f in files:
         if isinstance(f, nc.Dataset):
             nc_data = f
+            # Ownder opened, they take responsibility for closing.
+            needs_close = False
         else:
             nc_data = nc.Dataset(f)
+            needs_close = True
 
         try:
             time = get_valid_time(nc_data)
@@ -257,15 +260,42 @@ def total_fire_power_time_series(files, bounding_box):
                 
                 results[time] = total_power
         
-        except Exception e:
+        except Exception as e:
             if isinstance(f, nc.Dataset):
                 msg = f.filepath()
             else:
                 msg = f
             print("Error, skipping {} for error {}".format(msg, e))
             continue
+
+        if needs_close:
+            nc_data.close()
     
     return results
+
+def is_valid_netcdf_file(nc_data):
+    """Various QC checks on the data in the file."""
+    fname = Path(nc_data.filepath()).name
+
+    start_str = fname.split("_")[3][1:-1]
+    start_fname = dt.datetime.strptime(start_str + " UTC", "%Y%j%H%M%S %Z", )
+    start_fname = start_fname.replace(tzinfo=dt.timezone.utc)
+    end_str = fname.split("_")[4][1:-1]
+    end_fname = dt.datetime.strptime(end_str + " UTC", "%Y%j%H%M%S %Z")
+    end_fname = end_fname.replace(tzinfo=dt.timezone.utc)
+
+    avg_fname = start_fname + (end_fname - start_fname) / 2
+
+    vtime = get_valid_time(nc_data)
+    if vtime is None:
+        return False
+
+    diff = (avg_fname - vtime).total_seconds()
+
+    if diff > 60:
+        return False
+
+    return True
 
 
 def get_valid_time(nc_dataset):
