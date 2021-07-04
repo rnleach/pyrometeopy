@@ -236,7 +236,8 @@ def total_fire_power_time_series(files, bounding_box):
     bounding_box is the bounding boxe to gather data for.
 
     Returns: A dictionary where valid time is the key and
-    the value is the fire power.
+    the value is tuple with the fire power and original
+    file name.
     """
     
     assert isinstance(bounding_box, BoundingBox)
@@ -246,9 +247,11 @@ def total_fire_power_time_series(files, bounding_box):
     for f in files:
         if isinstance(f, nc.Dataset):
             nc_data = f
+            fname = f.filepath()
             # Ownder opened, they take responsibility for closing.
             needs_close = False
         else:
+            fname = str(f)
             nc_data = nc.Dataset(f)
             needs_close = True
 
@@ -258,7 +261,7 @@ def total_fire_power_time_series(files, bounding_box):
             if time >= bb.start and time <= bb.end:
                 total_power = get_total_fire_power(nc_data, bb)
                 
-                results[time] = total_power
+                results[time] = (total_power, fname)
         
         except Exception as e:
             if isinstance(f, nc.Dataset):
