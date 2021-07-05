@@ -2,6 +2,7 @@
 
 from collections import namedtuple
 from datetime import datetime as dt
+from datetime import timezone as tz
 from itertools import zip_longest
 from os import listdir
 import os.path as path
@@ -306,7 +307,7 @@ def __parse_date_time(text):
     month = int(text[2:4])
     day = int(text[4:6])
     hour = int(text[7:9])
-    return dt(year, month, day, hour)
+    return dt(year, month, day, hour, tzinfo=tz.utc)
 
 
 def __parse_profile(rawText):
