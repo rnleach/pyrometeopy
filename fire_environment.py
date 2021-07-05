@@ -20,8 +20,10 @@ Srock AF, Charney JJ, Potter BE, Goodrick SL. The Hot-Dry-Windy Index: A New Fir
 from collections import namedtuple
 from itertools import dropwhile, takewhile
 
-import bufkit
-import formulas as wxf
+try:
+    import pyrometeopy.formulas as wxf
+except Exception:
+    import formulas as wxf
 
 
 def dcape(sounding):

@@ -21,8 +21,11 @@ from collections import namedtuple
 from itertools import dropwhile, takewhile
 import math
 
-import bufkit
-import formulas as wxf
+try:
+    import pyrometeopy.formulas as wxf
+except Exception:
+    import formulas as wxf
+
 import itertools
 import numpy as np
 
