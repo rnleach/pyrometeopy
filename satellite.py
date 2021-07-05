@@ -446,34 +446,35 @@ def _get_grid_cell_indexes(proj, xs, ys, bounding_box):
     min_lat, min_lon = bounding_box.sw_corner()
     max_lat, max_lon = bounding_box.ne_corner()
     
-    # Calculate the lat and lon grids
-    xs, ys = np.meshgrid(xs, ys)
-    a_vals = np.power(np.sin(xs), 2.0) + \
-            np.power(np.cos(xs), 2.0) * (np.power(np.cos(ys), 2.0) + \
-                eq_rad * eq_rad / polar_rad / polar_rad * np.power(np.sin(ys), 2.0))
-    b_vals = -2 * h * np.cos(xs) * np.cos(ys)
-    c_val = h * h - eq_rad * eq_rad
-    
-    rs = (-b_vals - np.sqrt(np.power(b_vals, 2.0) - 4 * a_vals * c_val)) / (2 * a_vals)
-    
-    sx = rs * np.cos(xs) * np.cos(ys)
-    sy = -rs * np.sin(xs)
-    sz = rs * np.cos(xs) * np.sin(ys)
-    
-    lats = np.arctan((eq_rad *eq_rad * sz) \
-            / (polar_rad * polar_rad * np.sqrt(np.power(h - sx, 2.0) + np.power(sy, 2.0))))
-    lats = np.degrees(lats)
-    
-    lons = np.radians(lon0) - np.arctan(sy / (h - sx))
-    lons = np.degrees(lons)
-    
-    # Flatten the arrays so we get a 1D list of indexes
-    lats = lats.flatten()
-    lons = lons.flatten()
-    
-    # Filter out values not in our bounding box
-    lats = np.where(np.logical_and(lats >= min_lat, lats <= max_lat))[0]
-    lons = np.where(np.logical_and(lons >= min_lon, lons <= max_lon))[0]
-    idxs = list(set(lons).intersection(set(lats)))
+    with np.errstate(invalid='ignore'):
+        # Calculate the lat and lon grids
+        xs, ys = np.meshgrid(xs, ys)
+        a_vals = np.power(np.sin(xs), 2.0) + \
+                np.power(np.cos(xs), 2.0) * (np.power(np.cos(ys), 2.0) + \
+                    eq_rad * eq_rad / polar_rad / polar_rad * np.power(np.sin(ys), 2.0))
+        b_vals = -2 * h * np.cos(xs) * np.cos(ys)
+        c_val = h * h - eq_rad * eq_rad
+        
+        rs = (-b_vals - np.sqrt(np.power(b_vals, 2.0) - 4 * a_vals * c_val)) / (2 * a_vals)
+        
+        sx = rs * np.cos(xs) * np.cos(ys)
+        sy = -rs * np.sin(xs)
+        sz = rs * np.cos(xs) * np.sin(ys)
+        
+        lats = np.arctan((eq_rad *eq_rad * sz) \
+                / (polar_rad * polar_rad * np.sqrt(np.power(h - sx, 2.0) + np.power(sy, 2.0))))
+        lats = np.degrees(lats)
+        
+        lons = np.radians(lon0) - np.arctan(sy / (h - sx))
+        lons = np.degrees(lons)
+        
+        # Flatten the arrays so we get a 1D list of indexes
+        lats = lats.flatten()
+        lons = lons.flatten()
+        
+        # Filter out values not in our bounding box
+        lats = np.where(np.logical_and(lats >= min_lat, lats <= max_lat))[0]
+        lons = np.where(np.logical_and(lons >= min_lon, lons <= max_lon))[0]
+        idxs = list(set(lons).intersection(set(lats)))
     
     return idxs
