@@ -1,6 +1,8 @@
 """Tools to extract and analyze data from GOES-R."""
 
 import datetime as dt
+import itertools
+from multiprocessing import Pool
 import netCDF4 as nc
 import numpy as np
 from pathlib import Path
@@ -275,6 +277,69 @@ def total_fire_power_time_series(files, bounding_box):
             nc_data.close()
     
     return results
+
+def total_fire_power_time_series_par(files, bounding_box):
+    """Create time series of total fire power.
+
+    Arguments:
+    files is a list of NetCDF4 files with fire power data.
+        Either the paths or opened nc.Dataset's can be
+        passed in.
+    bounding_box is the bounding boxe to gather data for.
+
+    Returns: A dictionary where valid time is the key and
+    the value is tuple with the fire power and original
+    file name.
+    """
+    
+    assert isinstance(bounding_box, BoundingBox)
+    bb = bounding_box
+
+    pool = Pool()
+
+    vals = pool.imap(_process_single_fire_power_time_series, zip(files, itertools.repeat(bb)))
+    
+    results = {}
+    for time, val, fname in vals:
+        results[time] = (val, fname)
+
+    return results
+
+def _process_single_fire_power_time_series(tuple_arg):
+    nc_file, bb = tuple_arg
+
+    if isinstance(nc_file, nc.Dataset):
+        nc_data = nc_file
+        fname = nc_file.filepath()
+        # Ownder opened, they take responsibility for closing.
+        needs_close = False
+    else:
+        fname = str(nc_file)
+        nc_data = nc.Dataset(nc_file)
+        needs_close = True
+
+    try:
+        time = get_valid_time(nc_data)
+        
+        if time >= bb.start and time <= bb.end:
+            total_power = get_total_fire_power(nc_data, bb)
+            
+            return (time, total_power, fname)
+    
+    except Exception as e:
+        if isinstance(f, nc.Dataset):
+            msg = f.filepath()
+        else:
+            msg = f
+        print("Error, skipping {} for error {}".format(msg, e))
+        return None
+
+    finally:
+        if needs_close:
+            nc_data.close()
+
+    return
+
 
 def is_valid_netcdf_file(nc_data):
     """Various QC checks on the data in the file."""
