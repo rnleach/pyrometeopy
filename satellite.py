@@ -298,6 +298,9 @@ def total_fire_power_time_series_par(files, bounding_box):
     pool = Pool()
 
     vals = pool.imap(_process_single_fire_power_time_series, zip(files, itertools.repeat(bb)))
+
+    if vals is None:
+        return {}
     
     results = {}
     for time, val, fname in vals:
@@ -311,7 +314,7 @@ def _process_single_fire_power_time_series(tuple_arg):
     if isinstance(nc_file, nc.Dataset):
         nc_data = nc_file
         fname = nc_file.filepath()
-        # Ownder opened, they take responsibility for closing.
+        # Owner opened, they take responsibility for closing.
         needs_close = False
     else:
         fname = str(nc_file)
