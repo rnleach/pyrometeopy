@@ -412,7 +412,7 @@ def get_total_fire_power(nc_dataset, bounding_box):
     
     powers = list(nc_dataset.variables['Power'][:].flatten()[idxs])
     powers = (x for x in powers if x != 'masked')
-    total_power = sum(powers) / 1000   # This makes it Gigawatts
+    total_power = sum(powers) / 1000.0   # This makes it Gigawatts
     
     return total_power
 
