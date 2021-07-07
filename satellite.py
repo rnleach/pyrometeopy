@@ -298,10 +298,8 @@ def total_fire_power_time_series_par(files, bounding_box):
     pool = Pool()
 
     vals = pool.imap(_process_single_fire_power_time_series, zip(files, itertools.repeat(bb)))
+    vals = (val for val in vals if val is not None)
 
-    if vals is None:
-        return {}
-    
     results = {}
     for time, val, fname in vals:
         results[time] = (val, fname)
