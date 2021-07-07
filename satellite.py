@@ -131,9 +131,13 @@ def _download_files(
     any downloaded files. If the target file was already downloaded, it just 
     yields the local file name without redownloading it.
     """
+    # Don't try to download things that don't exist yet.
+    if current_time > dt.datetime.now(dt.timezone.utc):
+        return None
+    
     time_path = current_time.strftime("%Y/%j/%H")
     remote_dir = "{}/{}/{}".format(s3_bucket, product, time_path)
-    
+
     # Use the anonymous credentials to access public data
     fs = s3fs.S3FileSystem(anon=True)
     
@@ -144,7 +148,7 @@ def _download_files(
     files = tuple(zip(remote_files, local_files))
     
     # If there's some missing data, remember!
-    if len(files) < 11 and current_time < too_old_to_be_missing:
+    if len(files) < 12 and current_time < too_old_to_be_missing:
         missing_data.append(missing_key)
     
     for remote, local in files:
