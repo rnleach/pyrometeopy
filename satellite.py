@@ -66,7 +66,10 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
         return []
     
     # Get a list of files we already have downloaded.
-    current_files = tuple(f for f in folder.iterdir() if "ABI-L2" in f.name and f.suffix == ".nc")
+    current_files = tuple(
+        f for f in folder.iterdir()
+        if "ABI-L2" in f.name and product in f.name and satellite in f.name and f.suffix == ".nc"
+    )
     
     # Files older than this are too old to be missing, and must be
     # permanently missing. So we shouldn't check for them again, just
@@ -87,12 +90,13 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
         
         # Check to see how many matching files we have
         time_prefix = current_time.strftime("_s%Y%j%H")
-        missing_key = "{}{}".format(satellite, time_prefix)
-        local_files_this_hour = (f for f in current_files if satellite in f.name)
-        local_files_this_hour = tuple(f for f in local_files_this_hour if time_prefix in f.name)
+        missing_key = "{}{}_{}".format(satellite, time_prefix, product)
+        local_files_this_hour = tuple(f for f in current_files if time_prefix in f.name)
         
-        # Should be 12 per hour for CONUS 
-        if len(local_files_this_hour) >= 11:                                                   
+        # Should be 12 per hour for CONUS
+        if "FDCC" in missing_key and len(local_files_this_hour) >= 11:
+            result_list.extend(local_files_this_hour)
+        elif "FDCF" in missing_key and len(local_files_this_hour) >= 5:
             result_list.extend(local_files_this_hour)
         
         elif missing_key not in missing_data:
@@ -137,7 +141,7 @@ def _download_files(
     
     time_path = current_time.strftime("%Y/%j/%H")
     remote_dir = "{}/{}/{}".format(s3_bucket, product, time_path)
-
+    
     # Use the anonymous credentials to access public data
     fs = s3fs.S3FileSystem(anon=True)
     
@@ -232,56 +236,6 @@ class BoundingBox:
         return (self.sw_corner(), self.ne_corner())
 
 
-def total_fire_power_time_series(files, bounding_box):
-    """Create time series of total fire power.
-
-    Arguments:
-    files is a list of NetCDF4 files with fire power data.
-        Either the paths or opened nc.Dataset's can be
-        passed in.
-    bounding_box is the bounding boxe to gather data for.
-
-    Returns: A dictionary where valid time is the key and
-    the value is tuple with the fire power and original
-    file name.
-    """
-    
-    assert isinstance(bounding_box, BoundingBox)
-    bb = bounding_box
-    
-    results = {}
-    for f in files:
-        if isinstance(f, nc.Dataset):
-            nc_data = f
-            fname = f.filepath()
-            # Ownder opened, they take responsibility for closing.
-            needs_close = False
-        else:
-            fname = str(f)
-            nc_data = nc.Dataset(f)
-            needs_close = True
-
-        try:
-            time = get_valid_time(nc_data)
-            
-            if time >= bb.start and time <= bb.end:
-                total_power = get_total_fire_power(nc_data, bb)
-                
-                results[time] = (total_power, fname)
-        
-        except Exception as e:
-            if isinstance(f, nc.Dataset):
-                msg = f.filepath()
-            else:
-                msg = f
-            print("Error, skipping {} for error {}".format(msg, e))
-            continue
-
-        if needs_close:
-            nc_data.close()
-    
-    return results
-
 def total_fire_power_time_series_par(files, bounding_box):
     """Create time series of total fire power.
 
@@ -298,21 +252,22 @@ def total_fire_power_time_series_par(files, bounding_box):
     
     assert isinstance(bounding_box, BoundingBox)
     bb = bounding_box
-
-    pool = Pool()
-
-    vals = pool.imap(_process_single_fire_power_time_series, zip(files, itertools.repeat(bb)))
-    vals = (val for val in vals if val is not None)
-
+    
     results = {}
-    for time, val, fname in vals:
-        results[time] = (val, fname)
-
+    with Pool() as pool:
+    
+        vals = pool.imap(_process_single_fire_power_time_series, zip(files, itertools.repeat(bb)))
+        vals = (val for val in vals if val is not None)
+        
+        for time, val, fname in vals:
+            results[time] = (val, fname)
+    
     return results
+
 
 def _process_single_fire_power_time_series(tuple_arg):
     nc_file, bb = tuple_arg
-
+    
     if isinstance(nc_file, nc.Dataset):
         nc_data = nc_file
         fname = nc_file.filepath()
@@ -322,8 +277,9 @@ def _process_single_fire_power_time_series(tuple_arg):
         fname = str(nc_file)
         nc_data = nc.Dataset(nc_file)
         needs_close = True
-
+    
     try:
+        print("        processing file:", fname)
         time = get_valid_time(nc_data)
         
         if time >= bb.start and time <= bb.end:
@@ -338,36 +294,39 @@ def _process_single_fire_power_time_series(tuple_arg):
             msg = f
         print("Error, skipping {} for error {}".format(msg, e))
         return None
-
+    
     finally:
         if needs_close:
             nc_data.close()
-
+    
     return
 
 
 def is_valid_netcdf_file(nc_data):
     """Various QC checks on the data in the file."""
     fname = Path(nc_data.filepath()).name
-
+    
     start_str = fname.split("_")[3][1:-1]
-    start_fname = dt.datetime.strptime(start_str + " UTC", "%Y%j%H%M%S %Z", )
+    start_fname = dt.datetime.strptime(
+        start_str + " UTC",
+        "%Y%j%H%M%S %Z",
+    )
     start_fname = start_fname.replace(tzinfo=dt.timezone.utc)
     end_str = fname.split("_")[4][1:-1]
     end_fname = dt.datetime.strptime(end_str + " UTC", "%Y%j%H%M%S %Z")
     end_fname = end_fname.replace(tzinfo=dt.timezone.utc)
-
+    
     avg_fname = start_fname + (end_fname - start_fname) / 2
-
+    
     vtime = get_valid_time(nc_data)
     if vtime is None:
         return False
-
+    
     diff = (avg_fname - vtime).total_seconds()
-
+    
     if diff > 60:
         return False
-
+    
     return True
 
 
@@ -417,7 +376,7 @@ def get_total_fire_power(nc_dataset, bounding_box):
     
     powers = list(nc_dataset.variables['Power'][:].flatten()[idxs])
     powers = (x for x in powers if x != 'masked')
-    total_power = sum(powers) / 1000.0   # This makes it Gigawatts
+    total_power = sum(powers) / 1000.0      # This makes it Gigawatts
     
     return total_power
 
