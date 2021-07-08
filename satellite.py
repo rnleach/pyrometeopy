@@ -2,7 +2,7 @@
 
 import datetime as dt
 import itertools
-from multiprocessing import Pool
+from multiprocessing import get_context
 import netCDF4 as nc
 import numpy as np
 from pathlib import Path
@@ -236,6 +236,33 @@ class BoundingBox:
         return (self.sw_corner(), self.ne_corner())
 
 
+def total_fire_power_time_series(files, bounding_box):
+    """Create time series of total fire power.
+
+    Arguments:
+    files is a list of NetCDF4 files with fire power data.
+        Either the paths or opened nc.Dataset's can be
+        passed in.
+    bounding_box is the bounding boxe to gather data for.
+
+    Returns: A dictionary where valid time is the key and
+    the value is tuple with the fire power and original
+    file name.
+    """
+    
+    assert isinstance(bounding_box, BoundingBox)
+    bb = bounding_box
+    
+    results = {}
+    
+    vals = map(_process_single_fire_power_time_series, zip(files, itertools.repeat(bb)))
+    vals = (val for val in vals if val is not None)
+    
+    for time, val, fname in vals:
+        results[time] = (val, fname)
+    
+    return results
+
 def total_fire_power_time_series_par(files, bounding_box):
     """Create time series of total fire power.
 
@@ -254,9 +281,9 @@ def total_fire_power_time_series_par(files, bounding_box):
     bb = bounding_box
     
     results = {}
-    with Pool() as pool:
+    with get_context('spawn').Pool() as pool:
     
-        vals = pool.imap(_process_single_fire_power_time_series, zip(files, itertools.repeat(bb)))
+        vals = pool.map(_process_single_fire_power_time_series, zip(files, itertools.repeat(bb)))
         vals = (val for val in vals if val is not None)
         
         for time, val, fname in vals:
@@ -279,7 +306,6 @@ def _process_single_fire_power_time_series(tuple_arg):
         needs_close = True
     
     try:
-        print("        processing file:", fname)
         time = get_valid_time(nc_data)
         
         if time >= bb.start and time <= bb.end:
