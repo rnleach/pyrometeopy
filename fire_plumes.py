@@ -219,7 +219,7 @@ class BlowUpAnalysis(
                 " ΔT LMIB - %s, ΔZ LMIB - %s, Pct Wet - %s") % (cld, lmib, dz, pw)
 
 
-def lift_parcel(parcel, sounding):
+def lift_parcel(parcel, sounding, elevation=None):
     """Simulate lifting a parcel through a sounding focusing on buoyancy.
 
     Reference Leach & Gibson, 2021.
@@ -246,6 +246,10 @@ def lift_parcel(parcel, sounding):
         sounding.profile.pressure, sounding.profile.temp, sounding.profile.dewpoint,
         sounding.profile.hgt
     )
+
+    if elevation is not None:
+        env_profile = (x for x in env_profile if x[3] >= elevation)
+    
     env_profile = (x for x in env_profile if not any(y is None for y in x))
     env_profile = map(
         lambda x: (x[0], wxf.virtual_temperature_c(x[1], x[2], x[0]), x[3]), env_profile
@@ -537,11 +541,24 @@ def _dry_parcel_profile(parcel_profile):
     return to_ret_pcl_virt_t
 
 
-def mixed_layer_parcel(sounding):
-    """Get a 100 hPa surface based mixed layer parcel."""
+def mixed_layer_parcel(sounding, elevation=None):
+    """Get a 100 hPa surface based mixed layer parcel.
+
+    If you are using a sounding nearby another location (such as a fire), 
+    providing elevation will skip all levels below the desired
+    elevation. Elevation is in meters.
+    """
     assert sounding, "None sounding supplied"
     
-    sfc_press = sounding.profile.pressure[0]
+    if elevation is None:
+        sfc_press = sounding.profile.pressure[0]
+    else:
+        ph_iter = zip(sounding.profile.pressure, sounding.profile.hgt)
+        p_iter = (x[0] for x in ph_iter if x[1] >= elevation)
+        try:
+            sfc_press = next(p_iter)
+        except Exception as e:
+            sfc_press = None
     if sfc_press is None:
         return None
     
@@ -551,15 +568,17 @@ def mixed_layer_parcel(sounding):
     sum_sh = 0.0
     count = 0
     
-    dp = sounding.surface.dewpoint
-    t = sounding.surface.temp
-    if dp is not None and t is not None:
-        count += 1
-        sum_sh += wxf.specific_humidity(dp, sfc_press)
-        sum_theta += wxf.theta_kelvin(sfc_press, t)
+    if elevation is not None:
+        dp = sounding.surface.dewpoint
+        t = sounding.surface.temp
+        if dp is not None and t is not None:
+            count += 1
+            sum_sh += wxf.specific_humidity(dp, sfc_press)
+            sum_theta += wxf.theta_kelvin(sfc_press, t)
     
     iter = zip(sounding.profile.pressure, sounding.profile.temp, sounding.profile.dewpoint)
     iter = filter(lambda x: x[0] is not None and x[1] is not None and x[2] is not None, iter)
+    iter = (x for x in iter if x[0] <= sfc_press)
     iter = takewhile(lambda x: x[0] >= top_press, iter)
     
     for p, t, dp in iter:
@@ -606,14 +625,17 @@ def heated_parcel(starting_parcel, heating, moisture_ratio):
     return starting_parcel._replace(temperature=new_t, dew_point=new_dp)
 
 
-def blow_up_analysis(sounding, moisture_ratio):
+def blow_up_analysis(sounding, moisture_ratio, elevation=None):
     """Perform a fire plume blow up analysis on a sounding.
 
     Reference Leach & Gibson, 2021.
 
     moisture_ratio is the moisture_ratio to apply when creating a
     heated_parcel from the above so named function. If it is None that
-    implies no fire moisture should be added to the parcels.
+        implies no fire moisture should be added to the parcels.
+    elevation is the bottom elevation of the fire. If you are using
+        a nearby sounding, this will filter out any levels below
+        the fire elevation.
 
     Start with a mixed layer parcel and apply heating to it in 0.1C
     increments up until a maximum heating of 20°C has been applied.
@@ -627,11 +649,11 @@ def blow_up_analysis(sounding, moisture_ratio):
     MAX_DT = 20.0
     DT_STEP = 0.1
     
-    pcl0 = mixed_layer_parcel(sounding)
+    pcl0 = mixed_layer_parcel(sounding, elevation)
     dts = np.arange(MIN_DT, MAX_DT, DT_STEP)
     
     pcls = (heated_parcel(pcl0, dt, moisture_ratio) for dt in dts)
-    profiles = (lift_parcel(p, sounding) for p in pcls)
+    profiles = (lift_parcel(p, sounding, elevation) for p in pcls)
     anals = tuple((analyze_parcel_ascent(pp), pp.hgt[0]) for pp in profiles)
     
     anals, h0s = zip(*anals)
