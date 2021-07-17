@@ -139,16 +139,18 @@ def _moist_adiabatic_descend_parcel(parcel, sounding):
     return full_profile
 
 
-def hdw(sounding):
+def hdw(sounding, elevation=None):
     """Calculate the Hot-Dry-Windy index for a sounding."""
     
     bottom = sounding.profile.elevation
+    if elevation is not None and elevation > bottom:
+        bottom = elevation
     top = bottom + 500.0
     
     # Find the station pressure for the surface adjusted temperature and dew point.
     bottom_p = sounding.surface.pres
     i = 0
-    while bottom_p is None:
+    while bottom_p is None or sounding.profile.hgt[i] < bottom:
         bottom_p = sounding.profile.pressure[i]
         i += 1
     
@@ -156,7 +158,8 @@ def hdw(sounding):
         sounding.profile.hgt, sounding.profile.temp, sounding.profile.dewpoint,
         sounding.profile.windSpd, sounding.profile.pressure
     )
-    
+
+    vals = filter(lambda x_: x_[0] >= bottom, vals)
     vals = tuple(takewhile(lambda x: x[0] <= top, vals))
     
     # Filter out None values
@@ -208,4 +211,5 @@ if __name__ == "__main__":
         print("\n\nWorking on model initial time %s" % test_data[0].profile.time)
         
         for snd in test_data:
-            print("DCAPE: {:4.0f} J/kg  -  HDW {:4.0f}".format(dcape(snd), hdw(snd)))
+            print("DCAPE: {:4.0f} J/kg  -  HDW {:4.0f}, {:4.0f}".format(dcape(snd), hdw(snd), 
+                hdw(snd, 1520)))
