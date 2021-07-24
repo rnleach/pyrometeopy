@@ -301,6 +301,8 @@ def specific_humidity(dp_c, pressure_hpa):
     if dp_c is None or pressure_hpa is None:
         return None
     vp = vapor_pressure_liquid_water(dp_c)
+    assert vp > 0
+    assert pressure_hpa > 0
     
     return vp / pressure_hpa * epsilon
 
@@ -313,6 +315,9 @@ def dew_point_from_p_and_specific_humidity(pressure_hpa, specific_humidity):
     Returns:
     The dew point in °C.
     """
+    assert pressure_hpa > 0
+    assert specific_humidity > 0
+
     if pressure_hpa is None or specific_humidity is None:
         return None
     vp = specific_humidity * pressure_hpa / epsilon

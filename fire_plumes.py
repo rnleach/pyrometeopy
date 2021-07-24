@@ -618,9 +618,12 @@ def heated_parcel(starting_parcel, heating, moisture_ratio):
     if moisture_ratio is None:
         new_dp = starting_parcel.dew_point
     else:
-        sh = wxf.specific_humidity(starting_parcel.dew_point, starting_parcel.pressure)
-        dsh = heating / moisture_ratio / 1000
-        new_dp = wxf.dew_point_from_p_and_specific_humidity(starting_parcel.pressure, sh + dsh)
+        if heating > 0:
+            sh = wxf.specific_humidity(starting_parcel.dew_point, starting_parcel.pressure)
+            dsh = heating / moisture_ratio / 1000
+            new_dp = wxf.dew_point_from_p_and_specific_humidity(starting_parcel.pressure, sh + dsh)
+        else:
+            new_dp = starting_parcel.dew_point
     
     return starting_parcel._replace(temperature=new_t, dew_point=new_dp)
 
