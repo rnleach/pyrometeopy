@@ -93,12 +93,14 @@ def download_goes_data(folder, start, end, product, satellite="G17"):
         missing_key = "{}{}_{}".format(satellite, time_prefix, product)
         local_files_this_hour = tuple(f for f in current_files if time_prefix in f.name)
         
+        result_list.extend(local_files_this_hour)
+
         # Should be 12 per hour for CONUS
-        if "FDCC" in missing_key and len(local_files_this_hour) >= 11:
-            result_list.extend(local_files_this_hour)
-        elif "FDCF" in missing_key and len(local_files_this_hour) >= 5:
-            result_list.extend(local_files_this_hour)
-        
+        if "FDCC" in missing_key and len(local_files_this_hour) >= 12:
+            pass
+        # Should be 6 per hour for Full Disk
+        elif "FDCF" in missing_key and len(local_files_this_hour) >= 6:
+            pass
         elif missing_key not in missing_data:
             
             result_list.extend(
