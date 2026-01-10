@@ -6,7 +6,7 @@ with the degree to which the atmosphere promotes or inhibits the growth for wild
 References:
 
 Tory K. J., & Kepert J. D. (2021). Pyrocumulonimbus Firepower Threshold: Assessing the Atmospheric
-    Potential for pyroCb, Weather and Forecasting, 36(2), 439-456. Retrieved Jun 2, 2021, 
+    Potential for pyroCb, Weather and Forecasting, 36(2), 439-456. Retrieved Jun 2, 2021,
     from https://journals.ametsoc.org/view/journals/wefo/36/2/WAF-D-20-0027.1.xml
 
 Tory K. J., Thurston W. & Kepert J. D. (2018). Thermodynamics of Pyrocumulus: A Conceptual 
@@ -732,28 +732,31 @@ def pft(sounding, moisture_ratio, fire_elevation=None):
         treated as the surface of the sounding.
 
 
-    Returns the PFT in gigawatts.
+    Returns a tuple (pft in GW, LCL/LFC in meters, LCL/LFC pressure in hPa,
+    mean wind in mps, delta theta in Kelvin, plume density at the LCL,
+    plume angle from vertical at LCL).
     """
     theta_ml, q_ml, p_sfc = _entrained_mixed_layer(sounding, fire_elevation)
     
     if theta_ml is None:
-        return None
+        return (None, None, None, None, None, None, None)
     
     z_fc, p_fc, theta_fc, d_theta_fc = _free_convection_level(
         sounding, moisture_ratio, theta_ml, q_ml, fire_elevation
     )
     
     if z_fc is None:
-        return None
+        return (None, None, None, None, None, None, None)
     
     mean_wind_mps = _entrained_layer_mean_wind_speed(z_fc, sounding, fire_elevation)
     
     if mean_wind_mps is None:
-        return None
+        return (None, None, None, None, None, None, None)
     
-    pft_val = _pft_formula(z_fc, p_fc, mean_wind_mps, d_theta_fc, theta_fc, p_sfc)
+    pft_val, density = _pft_formula(z_fc, p_fc, mean_wind_mps, d_theta_fc, theta_fc, p_sfc)
+    angle = math.degrees(math.atan(math.sqrt((2.0 * z_fc * -wxf.g * d_theta_fc) / (3.0 * mean_wind_mps**2 *theta_fc))))
     
-    return pft_val
+    return (pft_val, z_fc, p_fc, mean_wind_mps, d_theta_fc, density, angle)
 
 
 def _entrained_mixed_layer(sounding, fire_elevation):
@@ -792,7 +795,7 @@ def _entrained_mixed_layer(sounding, fire_elevation):
     except StopIteration:
         return (None, None, None)
     
-    max_p = p_sfc - 50.0                                                                    # Used to enforce at least a 50 hPa mixed layer is used.
+    max_p = p_sfc - 50.0  # Used to enforce at least a 50 hPa mixed layer is used.
     
     data_rows = zip(ps, zs, ts, dps)
     data_rows = (row for row in data_rows if all(x is not None for x in row))
@@ -800,7 +803,7 @@ def _entrained_mixed_layer(sounding, fire_elevation):
             for p, z, t, dp in data_rows)
     
     data_rows0, data_rows1 = itertools.tee(data_rows)
-    next(data_rows1)                                                                        # This should always be one level above!
+    next(data_rows1)  # This should always be one level above!
     data_row_pairs = zip(data_rows0, data_rows1)
     
     sum_theta = 0.0
@@ -825,9 +828,9 @@ def _entrained_mixed_layer(sounding, fire_elevation):
         avg_q = sum_q / h_sq
         
         return (p1, h1, avg_theta, avg_q)
-    
+
     avg_vals = (update_running_average(row_pair) for row_pair in data_row_pairs)
-                                                                                            # Ensure we get to the top of that minimum mixed layer.
+    # Ensure we get to the top of that minimum mixed layer.
     avg_vals = (vals for vals in avg_vals if vals[0] < max_p)
     
     def convert_to_lcl_pressure(row):
@@ -1066,11 +1069,11 @@ def _entrained_layer_mean_wind_speed(z_fc, sounding, fire_elevation):
         p1, u1, v1 = row1
         
         dp = p1 - p0
-        sum_u += (u0 * p0 + u1 * p1) * dp
-        sum_v += (v0 * p0 + v1 * p1) * dp
-        sum_p += (p0 + p1) * dp
+        sum_u += (u0 + u1) * dp
+        sum_v += (v0 + v1) * dp
+        sum_p += dp
     
-    # Divide by 2 cancel each other out inthe average equation.
+    # Divide by 2 cancel each other out in the average equation.
     avg_u = sum_u / sum_p
     avg_v = sum_v / sum_p
     
@@ -1081,17 +1084,16 @@ def _entrained_layer_mean_wind_speed(z_fc, sounding, fire_elevation):
 
 def _pft_formula(z_fc_meters, p_fc, mean_wind_mps, d_theta_fc, theta_fc, p_sfc):
     
-    z_fc_km = wxf.m_to_km(z_fc_meters)
-    
     PFT_CONST = 397.3   # Constant component of equation 25 from table 2 in Tory & Kepert, 2021.
     
-                            # Equation 28
+    # Equation 28
     p_c = p_sfc - (p_sfc - p_fc) / (1.0 + 0.32 * 0.4)
     
-                            # Equation 26 (divide by 10 because pressure is in hPa)
-    density = p_c / 10.0 / (wxf.R * theta_fc) * ((1000.0 / p_c)**(wxf.R / wxf.cp))
+    # Equation 26 (multiply by 100 because pressure is in hPa)
+    density = p_c * 100.0 / (wxf.R * theta_fc) * ((1000.0 / p_c)**(wxf.R / wxf.cp))
     
-    return PFT_CONST * density * (z_fc_km**2) * mean_wind_mps * d_theta_fc
+    # (divide by 1000 because z is in km and not meters)
+    return (PFT_CONST * density * (z_fc_meters**2) * mean_wind_mps * d_theta_fc / 1_000_000_000.0, density)
 
 
 if __name__ == "__main__":

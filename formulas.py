@@ -16,7 +16,7 @@ Djurić, D., 1994, Weather Analysis. Prentice Hall, 304 pp.
 Rogers, R. R., and M. K. Yau, 1989, A Short Course in Cloud Physics, 3rd ed. 
     Butterworth Heinemann, 290 pp. ISBN 0-7506-3215-1.
 """
-from math import exp, log
+from math import exp, log, sqrt, atan2, degrees, radians, sin, cos
 
 # Acceleration due to gravity at the Earth's surface. (m /s^2)
 g = -9.81
@@ -103,6 +103,20 @@ def m_to_km(meters):
     
     return meters / 1000
 
+def u_v_to_spd_dir(u, v):
+    """Convert from U, V to speed and direction."""
+    spd = sqrt(u * u + v * v)
+    direction = degrees(atan2(-u, -v))
+    return (spd, direction)
+
+
+def spd_dir_to_u_v(spd, direct):
+    """Convert from speed and direction to U and V."""
+    direct = radians(direct)
+    u = -spd * sin(direct)
+    v = -spd * cos(direct)
+    return (u, v)
+
 
 def theta_kelvin(pressure_hpa, t_c):
     """Calculate the potential temperature in Kelvin.
@@ -168,6 +182,17 @@ def calc_rh(t_c, dp_c):
     if t_c is None or dp_c is None:
         return None
     return 100.0 * vapor_pressure_liquid_water(dp_c) / vapor_pressure_liquid_water(t_c)
+
+
+def calc_vpd(t_c, dp_c):
+    """Calculate vapor pressure deficit.
+
+    Returns:
+    The vapor pressure deficit in hPa.
+    """
+    if t_c is None or dp_c is None:
+        return None
+    return vapor_pressure_liquid_water(t_c) - vapor_pressure_liquid_water(dp_c) 
 
 
 def calc_dp(t_c, rh):
@@ -381,7 +406,8 @@ def temperature_c_from_theta_e_saturated_and_pressure(pressure_hpa, theta_e_k):
         return te - theta_e_k
     
     try:
-        return find_root(func_to_minimize, -80.0, 50.0)
+        max_t = min(dew_point_from_vapor_pressure_over_liquid(pressure_hpa), 50.0)
+        return find_root(func_to_minimize, -80.0, max_t)
     except Exception:
         return None
 

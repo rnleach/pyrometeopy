@@ -187,6 +187,59 @@ def hdw(sounding, elevation=None):
     
     return max_vpd * max_wspd
 
+def reverse_wind_profile(sounding, elevation = None):
+    """Detect if there is a reverse wind profile.
+
+    Looks in the bottom 3km of the sounding for a layer with a reverse wind
+    profile.
+
+    Returns a tuple with (max wind spd-kts, elevation agl of max, 
+    min speed, elevation of min) or None
+    """
+    
+    bottom = sounding.profile.elevation
+    if elevation is not None and elevation > bottom:
+        bottom = elevation
+    top = bottom + 10000.0
+    top_start = bottom + 3000.0
+    
+    vals = zip(sounding.profile.hgt, sounding.profile.windSpd)
+    # Filter out missing values
+    vals = filter(lambda x_: x_[0] is not None and x_[1] is not None, vals)
+    # Start at the bottom elevation we're interested in
+    vals = filter(lambda x_: x_[0] >= bottom, vals)
+    # Map the height coordinate to meters above our chosen bottom
+    vals = map(lambda x_: (x_[0] - bottom, x_[1]), vals)
+    # And only take values up to the top level we're interested in
+    vals = tuple(takewhile(lambda x: x[0] <= top, vals))
+    
+    min_speed = None
+    min_speed_elev = None
+    max_speed = 0.0
+    max_speed_elev = bottom
+    prev_spd = 0.0
+    for hgt, spd in vals:
+        if spd > max_speed and min_speed is None:
+            max_speed = spd
+            max_speed_elev = hgt
+        elif spd < (max_speed - 5) and (min_speed is None or spd < min_speed):
+            min_speed = spd
+            min_speed_elev = hgt
+        elif spd > prev_spd and min_speed is not None:
+            break
+
+        if hgt > top_start and min_speed is None: 
+            # If we haven't found the max by now, abort. Reverse wind speed
+            # is too high
+            break
+
+        prev_spd = spd
+
+    if min_speed is not None:
+        return (max_speed, max_speed_elev, min_speed, min_speed_elev)
+    else:
+        return (None, None, None, None)
+    
 
 if __name__ == "__main__":
     import os.path as path
